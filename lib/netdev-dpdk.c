@@ -1050,11 +1050,13 @@ netdev_dpdk_vhost_construct(struct netdev *netdev)
         goto out;
     }
 
-    err = rte_vhost_driver_start(dev->vhost_id);
-    if (err) {
-        VLOG_ERR("rte_vhost_driver_start failed for vhost user "
-                 "port: %s\n", name);
-        goto out;
+    if (!vhostuser_no_autoconnect) {
+        err = rte_vhost_driver_start(dev->vhost_id);
+        if (err) {
+            VLOG_ERR("rte_vhost_driver_start failed for vhost user "
+                     "port: %s\n", name);
+            goto out;
+        }
     }
 
     err = vhost_common_construct(netdev);
@@ -2961,6 +2963,40 @@ out:
     netdev_close(netdev);
 }
 
+static void
+netdev_dpdk_reconnect(struct unixctl_conn *conn, int argc OVS_UNUSED,
+                      const char *argv[], void *aux OVS_UNUSED)
+{
+    int err;
+    struct netdev_dpdk *dev;
+
+    char *response = xasprintf("Not found the device.");
+
+    ovs_mutex_lock(&dpdk_mutex);
+ 
+    LIST_FOR_EACH (dev, list_node, &dpdk_list) {
+        ovs_mutex_lock(&dev->mutex);
+        if (strcmp(argv[1], netdev_get_name(&dev->up)) == 0) {
+            free(response);
+
+            err = rte_vhost_driver_start(dev->vhost_id);
+            response = err ? xasprintf("rte_vhost_driver_start failed for vhost user port'%s'",
+                                       netdev_get_name(&dev->up))
+                           : xasprintf("rte_vhost_driver_start successed for device '%s'",
+                                       netdev_get_name(&dev->up));
+
+            ovs_mutex_unlock(&dev->mutex);
+            break;
+        }
+        ovs_mutex_unlock(&dev->mutex);
+    }
+
+    ovs_mutex_unlock(&dpdk_mutex);
+    unixctl_command_reply(conn, response);
+    free(response);
+    return;
+}
+
 /*
  * Set virtqueue flags so that we do not receive interrupts.
  */
@@ -3220,6 +3256,9 @@ netdev_dpdk_class_init(void)
         unixctl_command_register("netdev-dpdk/get-mempool-info",
                                  "[netdev]", 0, 1,
                                  netdev_dpdk_get_mempool_info, NULL);
+        unixctl_command_register("netdev-dpdk/reconnect",
+                                 "netdev", 1, 1,
+                                 netdev_dpdk_reconnect, NULL);
 
         ovsthread_once_done(&once);
     }
@@ -3723,11 +3762,13 @@ netdev_dpdk_vhost_client_reconfigure(struct netdev *netdev)
             goto unlock;
         }
 
-        err = rte_vhost_driver_start(dev->vhost_id);
-        if (err) {
-            VLOG_ERR("rte_vhost_driver_start failed for vhost user "
-                     "client port: %s\n", dev->up.name);
-            goto unlock;
+        if (!vhostuser_no_autoconnect) {
+            err = rte_vhost_driver_start(dev->vhost_id);
+            if (err) {
+                VLOG_ERR("rte_vhost_driver_start failed for vhost user "
+                         "client port: %s\n", dev->up.name);
+                goto unlock;
+            }
         }
     }
 

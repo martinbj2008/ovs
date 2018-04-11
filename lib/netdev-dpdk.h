@@ -22,6 +22,7 @@
 #include "openvswitch/compiler.h"
 
 struct dp_packet;
+extern bool vhostuser_no_autoconnect;
 
 #ifdef DPDK_NETDEV
 
