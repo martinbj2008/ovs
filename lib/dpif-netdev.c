@@ -100,6 +100,7 @@ static struct shash dp_netdevs OVS_GUARDED_BY(dp_netdev_mutex)
     = SHASH_INITIALIZER(&dp_netdevs);
 
 static struct vlog_rate_limit upcall_rl = VLOG_RATE_LIMIT_INIT(600, 600);
+extern bool vhostuser_cpu_yield;
 
 #define DP_NETDEV_CS_SUPPORTED_MASK (CS_NEW | CS_ESTABLISHED | CS_RELATED \
                                      | CS_INVALID | CS_REPLY_DIR | CS_TRACKED \
@@ -4154,6 +4155,9 @@ reload:
              * There was no time updates on current iteration. */
             pmd_thread_ctx_time_update(pmd);
             iter_packets += dp_netdev_pmd_flush_output_packets(pmd, false);
+            if (unlikely(vhostuser_cpu_yield)) {
+                pthread_yield();
+            }
         }
 
         if (lc++ > 1024) {
@@ -4173,6 +4177,10 @@ reload:
             }
         }
         pmd_perf_end_iteration(s, iter_packets);
+
+        if (unlikely(vhostuser_cpu_yield) && iter_packets > 32) {
+            pthread_yield();
+        }
     }
 
     poll_cnt = pmd_load_queues_and_ports(pmd, &poll_list);

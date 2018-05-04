@@ -44,6 +44,7 @@ static FILE *log_stream = NULL;       /* Stream for DPDK log redirection */
 static char *vhost_sock_dir = NULL;   /* Location of vhost-user sockets */
 static bool vhost_iommu_enabled = false; /* Status of vHost IOMMU support */
 bool vhostuser_no_autoconnect = false;
+bool vhostuser_cpu_yield = false;
 
 static int
 process_vhost_flags(char *flag, const char *default_val, int size,
@@ -468,6 +469,7 @@ dpdk_init(const struct smap *ovs_other_config)
     vhostuser_no_autoconnect = smap_get_bool(ovs_other_config,
                                              "vhostuser-no-autoconnect",
                                              false);
+    vhostuser_cpu_yield = smap_get_bool(ovs_other_config, "cpu-yield", false);
 
     if (enabled || !ovs_other_config) {
         return;
