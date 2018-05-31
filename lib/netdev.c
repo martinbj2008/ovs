@@ -1320,9 +1320,9 @@ netdev_restore_flags(struct netdev_saved_flags *sf)
         enum netdev_flags old_flags;
 
         netdev->netdev_class->update_flags(netdev,
-                sf->saved_flags & sf->saved_values,
-                sf->saved_flags & ~sf->saved_values,
-                &old_flags);
+                                           sf->saved_flags & sf->saved_values,
+                                           sf->saved_flags & ~sf->saved_values,
+                                           &old_flags);
 
         ovs_mutex_lock(&netdev_mutex);
         ovs_list_remove(&sf->node);

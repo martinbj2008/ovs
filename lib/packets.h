@@ -153,8 +153,8 @@ pkt_metadata_init(struct pkt_metadata *md, odp_port_t port)
     /* It can be expensive to zero out all of the tunnel metadata. However,
      * we can just zero out ip_dst and the rest of the data will never be
      * looked at. */
-    //md->tunnel.ip_dst = 0;
-    //md->tunnel.ipv6_dst = in6addr_any;
+    md->tunnel.ip_dst = 0;
+    md->tunnel.ipv6_dst = in6addr_any;
     md->in_port.odp_port = port;
 }
 

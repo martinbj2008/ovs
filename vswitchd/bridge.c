@@ -397,9 +397,7 @@ bridge_init(const char *remote)
     /* Create connection to database. */
     idl = ovsdb_idl_create(remote, &ovsrec_idl_class, true, true);
     idl_seqno = ovsdb_idl_get_seqno(idl);
-    char idl_lock_name[64] = {0};
-    sprintf(idl_lock_name, "ovs_vswitchd_%u", getpid());
-    ovsdb_idl_set_lock(idl, idl_lock_name);
+    ovsdb_idl_set_lock(idl, "ovs_vswitchd");
     ovsdb_idl_verify_write_only(idl);
 
     ovsdb_idl_omit_alert(idl, &ovsrec_open_vswitch_col_cur_cfg);

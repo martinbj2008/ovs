@@ -35,7 +35,7 @@ ofpbuf_init__(struct ofpbuf *b, size_t allocated, enum ofpbuf_source source)
 static void
 ofpbuf_use__(struct ofpbuf *b, void *base, size_t allocated, size_t size,
              enum ofpbuf_source source)
-{   
+{
     b->base = base;
     b->data = base;
     b->size = size;

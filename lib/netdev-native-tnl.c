@@ -70,10 +70,6 @@ netdev_tnl_ip_extract_tnl_md(struct dp_packet *packet, struct flow_tnl *tnl,
 
     nh = dp_packet_l3(packet);
     ip = nh;
-    /* Now we only support IPv4 */
-    ip->ip_ihl_ver = IP_IHL_VER(5, 4);
-    int ip_tot_size = dp_packet_size(packet) - sizeof (struct eth_header);
-    ip->ip_tot_len = htons(ip_tot_size);
     ip6 = nh;
     l4 = dp_packet_l4(packet);
 
@@ -192,7 +188,6 @@ udp_extract_tnl_md(struct dp_packet *packet, struct flow_tnl *tnl,
     }
 
     if (udp->udp_csum) {
-#if 0
         if (OVS_UNLIKELY(!dp_packet_l4_checksum_valid(packet))) {
             uint32_t csum;
             if (netdev_tnl_is_header_ipv6(dp_packet_data(packet))) {
@@ -209,7 +204,6 @@ udp_extract_tnl_md(struct dp_packet *packet, struct flow_tnl *tnl,
                 return NULL;
             }
         }
-#endif
         tnl->flags |= FLOW_TNL_F_CSUM;
     }
 
@@ -514,12 +508,8 @@ netdev_vxlan_pop_header(struct dp_packet *packet)
     ovs_be32 vx_flags;
     enum packet_type next_pt = PT_ETH;
 
-    /*
-     * we missed mini flow extract and only udp/ipv4 packet
-     * for current scenario.
-     */
-    packet->l3_ofs = sizeof (struct eth_header);
-    packet->l4_ofs = sizeof (struct eth_header) + IP_HEADER_LEN;
+    ovs_assert(packet->l3_ofs > 0);
+    ovs_assert(packet->l4_ofs > 0);
 
     pkt_metadata_init_tnl(md);
     if (VXLAN_HLEN > dp_packet_l4_size(packet)) {
