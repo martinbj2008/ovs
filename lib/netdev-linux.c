@@ -856,6 +856,8 @@ netdev_linux_construct_tap(struct netdev *netdev_)
     get_flags(&netdev->up, &netdev->ifi_flags);
     ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
     ovs_strzcpy(ifr.ifr_name, name, sizeof ifr.ifr_name);
+    if (strcmp(name, "ovs-netdev") == 0 || strcmp(name, "br-dpdk") == 0)
+        return 0;
     if (ioctl(netdev->tap_fd, TUNSETIFF, &ifr) == -1) {
         VLOG_WARN("%s: creating tap device failed: %s", name,
                   ovs_strerror(errno));
@@ -875,7 +877,6 @@ netdev_linux_construct_tap(struct netdev *netdev_)
         error = errno;
         goto error_close;
     }
-
     return 0;
 
 error_close:

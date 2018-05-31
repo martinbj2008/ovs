@@ -167,7 +167,7 @@ static const struct rte_eth_conf port_conf = {
         .hw_ip_checksum = 0, /* IP checksum offload disabled */
         .hw_vlan_filter = 0, /* VLAN filtering disabled */
         .jumbo_frame    = 0, /* Jumbo Frame Support disabled */
-        .hw_strip_crc   = 0,
+        .hw_strip_crc   = 1,
     },
     .rx_adv_conf = {
         .rss_conf = {
@@ -553,7 +553,7 @@ dpdk_mp_create(int socket_id, int mtu)
      * when the number of ports and rxqs that utilize a particular mempool can
      * change dynamically at runtime. For now, use this rough heurisitic.
      */
-    if (mtu >= ETHER_MTU) {
+    if (mtu > ETHER_MTU) {
         mp_size = MAX_NB_MBUF;
     } else {
         mp_size = MIN_NB_MBUF;

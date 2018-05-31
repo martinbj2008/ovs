@@ -122,6 +122,7 @@ xmalloc(size_t size)
     if (p == NULL) {
         out_of_memory();
     }
+    memset(p, 0, size ? size : 1);
     return p;
 }
 

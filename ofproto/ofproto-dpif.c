@@ -4516,7 +4516,8 @@ packet_xlate(struct ofproto *ofproto_, struct ofproto_packet_out *opo)
     xin.xcache = &aux->xcache;
     xin.in_packet_out = true;
 
-    if (xlate_actions(&xin, &xout) != XLATE_OK) {
+    enum xlate_error err =  xlate_actions(&xin, &xout);
+    if (err != XLATE_OK) {
         error = OFPERR_OFPFMFC_UNKNOWN;   /* Error processing actions. */
         goto error_out;
     } else {
