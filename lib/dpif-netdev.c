@@ -42,6 +42,7 @@
 #include "dpif.h"
 #include "dpif-netdev-perf.h"
 #include "dpif-provider.h"
+#include "netdev-provider.h"
 #include "dummy.h"
 #include "fat-rwlock.h"
 #include "flow.h"
@@ -73,6 +74,7 @@
 #include "timeval.h"
 #include "tnl-neigh-cache.h"
 #include "tnl-ports.h"
+#include "netdev-native-tnl.h"
 #include "unixctl.h"
 #include "util.h"
 
@@ -100,7 +102,6 @@ static struct shash dp_netdevs OVS_GUARDED_BY(dp_netdev_mutex)
     = SHASH_INITIALIZER(&dp_netdevs);
 
 static struct vlog_rate_limit upcall_rl = VLOG_RATE_LIMIT_INIT(600, 600);
-extern bool vhostuser_cpu_yield;
 
 #define DP_NETDEV_CS_SUPPORTED_MASK (CS_NEW | CS_ESTABLISHED | CS_RELATED \
                                      | CS_INVALID | CS_REPLY_DIR | CS_TRACKED \
@@ -585,6 +586,10 @@ struct dp_netdev_pmd_thread {
     int numa_id;                    /* numa node id of this pmd thread. */
     bool isolated;
 
+    odp_port_t vxlan_port_no;
+    odp_port_t vf1_port_no;
+    odp_port_t vf2_port_no;
+
     /* Queue id used by this pmd thread to send packets on all netdevs if
      * XPS disabled for this netdev. All static_tx_qid's are unique and less
      * than 'cmap_count(dp->poll_threads)'. */
@@ -718,6 +723,10 @@ static inline bool emc_entry_alive(struct emc_entry *ce);
 static void emc_clear_entry(struct emc_entry *ce);
 
 static void dp_netdev_request_reconfigure(struct dp_netdev *dp);
+
+static struct tx_port *pmd_send_port_cache_lookup(const struct dp_netdev_pmd_thread *pmd, odp_port_t port_no);
+
+static void dpif_netdev_pmd_port_reload(struct unixctl_conn *conn, int argc, const char *argv[], void *aux OVS_UNUSED);
 
 static void
 emc_cache_init(struct emc_cache *flow_cache)
@@ -1138,6 +1147,9 @@ dpif_netdev_init(void)
     unixctl_command_register("dpif-netdev/pmd-rxq-rebalance", "[dp]",
                              0, 1, dpif_netdev_pmd_rebalance,
                              NULL);
+    unixctl_command_register("dpif-netdev/pmd-port-reload", "[-pmd core] [dp]",
+                             0, 3, dpif_netdev_pmd_port_reload,
+                             NULL);
     return 0;
 }
 
@@ -1538,7 +1550,10 @@ port_create(const char *devname, const char *type,
         goto out;
     }
 
-    error = netdev_turn_flags_on(netdev, NETDEV_PROMISC, &sf);
+    if (strcmp(devname, "ovs-netdev") == 0 || strcmp(devname, "br-dpdk") == 0)
+        error = 0;
+    else
+        error = netdev_turn_flags_on(netdev, NETDEV_PROMISC, &sf);
     if (error) {
         VLOG_ERR("%s: cannot set promisc flag", devname);
         goto out;
@@ -1678,8 +1693,9 @@ port_destroy(struct dp_netdev_port *port)
         return;
     }
 
+    if (strcmp(port->netdev->name, "ovs-netdev") != 0 || strcmp(port->netdev->name, "br-dpdk") != 0)
+        netdev_restore_flags(port->sf);
     netdev_close(port->netdev);
-    netdev_restore_flags(port->sf);
 
     for (unsigned i = 0; i < port->n_rxq; i++) {
         netdev_rxq_close(port->rxqs[i].rx);
@@ -3270,6 +3286,9 @@ dp_netdev_process_rxq_port(struct dp_netdev_pmd_thread *pmd,
     int error;
     int batch_cnt = 0, output_cnt = 0;
     uint64_t cycles;
+    struct dp_packet *packet;
+    struct dp_packet_batch *batch_;
+    struct dp_packet *packet_tmp;
 
     /* Measure duration for polling and processing rx burst. */
     cycle_timer_start(&pmd->perf_stats, &timer);
@@ -3278,8 +3297,28 @@ dp_netdev_process_rxq_port(struct dp_netdev_pmd_thread *pmd,
     dp_packet_batch_init(&batch);
 
     error = netdev_rxq_recv(rxq->rx, &batch);
+    size_t i, size = dp_packet_batch_size(&batch);
+    batch_ = &batch;
     if (!error) {
-        /* At least one packet received. */
+        if (strcmp(rxq->port->type, "dpdk") == 0) {
+            /* At least one packet received. */
+            DP_PACKET_BATCH_REFILL_FOR_EACH (i, size, packet, batch_) {
+                packet = netdev_vxlan_pop_header(packet);
+                //packet = netdev->netdev_class->pop_header(packet);
+                if (packet) {
+                    /* Reset the checksum offload flags if present, to avoid wrong
+                     * interpretation in the further packet processing when
+                     * recirculated.*/
+                    reset_dp_packet_checksum_ol_flags(packet);
+                    dp_packet_batch_refill(batch_, packet, i);
+                }       
+            }
+            port_no = pmd->vxlan_port_no;
+            DP_PACKET_BATCH_FOR_EACH (packet_tmp, batch_) {
+                    packet_tmp->md.in_port.odp_port = port_no;
+            }
+        }
+
         *recirc_depth_get() = 0;
         pmd_thread_ctx_time_update(pmd);
 
@@ -4095,6 +4134,86 @@ pmd_load_queues_and_ports(struct dp_netdev_pmd_thread *pmd,
     return i;
 }
 
+static void pmd_port_reload(struct dp_netdev_pmd_thread *pmd){
+    struct dp_netdev_port *port;
+    struct dp_netdev_port *next_port;
+    HMAP_FOR_EACH_SAFE (port, next_port, node, &pmd->dp->ports) {
+        if (strcmp(port->type, "vxlan") == 0) {
+            pmd->vxlan_port_no = port->port_no;
+            break;
+        }
+    }
+
+    pmd->vf1_port_no = 0;
+    pmd->vf2_port_no = 0;
+
+    HMAP_FOR_EACH_SAFE (port, next_port, node, &pmd->dp->ports) {
+        if (strcmp(port->type, "dpdk") == 0) {
+            if(!pmd->vf1_port_no){
+                pmd->vf1_port_no = port->port_no;
+                continue;
+            }else{
+                pmd->vf2_port_no = port->port_no;
+                break;
+            }
+
+        }
+    }
+}
+
+static void dpif_netdev_pmd_port_reload(struct unixctl_conn *conn, int argc,
+                            const char *argv[], void *aux OVS_UNUSED){
+    struct dp_netdev_pmd_thread **pmd_list;
+    struct dp_netdev *dp = NULL;
+    unsigned int core_id;
+    bool filter_on_pmd = false;
+    size_t n;
+
+    ovs_mutex_lock(&dp_netdev_mutex);
+
+    while (argc > 1) {
+        if (!strcmp(argv[1], "-pmd") && argc >= 3) {
+            if (str_to_uint(argv[2], 10, &core_id)) {
+                filter_on_pmd = true;
+            }
+            argc -= 2;
+            argv += 2;
+        } else {
+            dp = shash_find_data(&dp_netdevs, argv[1]);
+            argc -= 1;
+            argv += 1;
+        }
+    }
+
+    if (!dp) {
+        if (shash_count(&dp_netdevs) == 1) {
+            /* There's only one datapath */
+            dp = shash_first(&dp_netdevs)->data;
+        } else {
+            ovs_mutex_unlock(&dp_netdev_mutex);
+            unixctl_command_reply_error(conn,
+                                        "please specify an existing datapath");
+            return;
+        }
+    }
+
+    sorted_poll_thread_list(dp, &pmd_list, &n);
+    for (size_t i = 0; i < n; i++) {
+        struct dp_netdev_pmd_thread *pmd = pmd_list[i];
+        if (!pmd) {
+            break;
+        }
+        if (filter_on_pmd && pmd->core_id != core_id) {
+            continue;
+        }
+        pmd_port_reload(pmd);
+    }
+    free(pmd_list);
+
+    ovs_mutex_unlock(&dp_netdev_mutex);
+    unixctl_command_reply(conn, "OK");
+}
+
 static void *
 pmd_thread_main(void *f_)
 {
@@ -4138,6 +4257,7 @@ reload:
     pmd->intrvl_tsc_prev = 0;
     atomic_store_relaxed(&pmd->intrvl_cycles, 0);
     cycles_counter_update(s);
+    pmd_port_reload(pmd);
     for (;;) {
         uint64_t iter_packets = 0;
 
@@ -4155,9 +4275,6 @@ reload:
              * There was no time updates on current iteration. */
             pmd_thread_ctx_time_update(pmd);
             iter_packets += dp_netdev_pmd_flush_output_packets(pmd, false);
-            if (unlikely(vhostuser_cpu_yield)) {
-                pthread_yield();
-            }
         }
 
         if (lc++ > 1024) {
@@ -4177,10 +4294,6 @@ reload:
             }
         }
         pmd_perf_end_iteration(s, iter_packets);
-
-        if (unlikely(vhostuser_cpu_yield) && iter_packets > 32) {
-            pthread_yield();
-        }
     }
 
     poll_cnt = pmd_load_queues_and_ports(pmd, &poll_list);
@@ -5032,6 +5145,13 @@ emc_processing(struct dp_netdev_pmd_thread *pmd,
         if (!md_is_valid) {
             pkt_metadata_init(&packet->md, port_no);
         }
+
+        if(port_no != pmd->vxlan_port_no){
+            packet->md.tunnel.ipv6_dst = in6addr_any;
+            packet->md.tunnel.ip_dst = 0;
+            packet->md.tunnel.tun_id = 0;
+        }
+
         miniflow_extract(packet, &key->mf);
         key->len = 0; /* Not computed yet. */
         /* If EMC is disabled skip hash computation and emc_lookup */
@@ -5513,9 +5633,45 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
         break;
 
     case OVS_ACTION_ATTR_TUNNEL_PUSH:
+
         if (*depth < MAX_RECIRC_DEPTH) {
+            struct dp_packet *packet;
             dp_packet_batch_apply_cutlen(packets_);
             push_tnl_action(pmd, a, packets_);
+            static int wp = 0;
+            /* find dpdk port to send tnl pkts out */
+            odp_port_t port_no;        
+
+        if(pmd->vf1_port_no){
+            port_no = pmd->vf1_port_no;
+            if(!wp){
+                wp = 1;
+            }else if(pmd->vf2_port_no){
+                port_no = pmd->vf2_port_no;
+                wp = 0;
+            }
+        }else{
+        return;
+        }
+
+            p = pmd_send_port_cache_lookup(pmd, port_no);
+            if (OVS_UNLIKELY(!dp_packet_batch_is_empty(&p->output_pkts)
+                        && packets_->packets[0]->source
+                        != p->output_pkts.packets[0]->source)) {
+                /* XXX: netdev-dpdk assumes that all packets in a single
+                 * output batch has the same source. Flush here to
+                 * avoid memory access issues. */
+                dp_netdev_pmd_flush_output_on_port(pmd, p);
+            }
+            if (dp_packet_batch_is_empty(&p->output_pkts)) {
+                pmd->n_output_batches++;
+            }
+
+            DP_PACKET_BATCH_FOR_EACH (packet, packets_) {
+                p->output_pkts_rxqs[dp_packet_batch_size(&p->output_pkts)] =
+                    pmd->ctx.last_rxq;
+                dp_packet_batch_add(&p->output_pkts, packet);
+            }
             return;
         }
         break;

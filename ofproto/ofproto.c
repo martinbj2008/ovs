@@ -3555,6 +3555,8 @@ handle_packet_out(struct ofconn *ofconn, const struct ofp_header *oh)
     enum ofperr error;
 
     COVERAGE_INC(ofproto_packet_out);
+    memset(&po, 0, sizeof(struct ofputil_packet_out)); 
+    memset(&opo, 0, sizeof(struct ofputil_packet_out));   
 
     error = reject_slave_controller(ofconn);
     if (error) {

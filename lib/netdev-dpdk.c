@@ -167,7 +167,7 @@ static const struct rte_eth_conf port_conf = {
         .hw_ip_checksum = 0, /* IP checksum offload disabled */
         .hw_vlan_filter = 0, /* VLAN filtering disabled */
         .jumbo_frame    = 0, /* Jumbo Frame Support disabled */
-        .hw_strip_crc   = 0,
+        .hw_strip_crc   = 1,
     },
     .rx_adv_conf = {
         .rss_conf = {
@@ -553,7 +553,7 @@ dpdk_mp_create(int socket_id, int mtu)
      * when the number of ports and rxqs that utilize a particular mempool can
      * change dynamically at runtime. For now, use this rough heurisitic.
      */
-    if (mtu >= ETHER_MTU) {
+    if (mtu > ETHER_MTU) {
         mp_size = MAX_NB_MBUF;
     } else {
         mp_size = MIN_NB_MBUF;
@@ -1054,7 +1054,7 @@ netdev_dpdk_vhost_construct(struct netdev *netdev)
         err = rte_vhost_driver_start(dev->vhost_id);
         if (err) {
             VLOG_ERR("rte_vhost_driver_start failed for vhost user "
-                     "port: %s\n", name);
+                "port: %s\n", name);
             goto out;
         }
     }
@@ -2965,7 +2965,7 @@ out:
 
 static void
 netdev_dpdk_reconnect(struct unixctl_conn *conn, int argc OVS_UNUSED,
-                      const char *argv[], void *aux OVS_UNUSED)
+        const char *argv[], void *aux OVS_UNUSED)
 {
     int err;
     struct netdev_dpdk *dev;
@@ -2973,7 +2973,7 @@ netdev_dpdk_reconnect(struct unixctl_conn *conn, int argc OVS_UNUSED,
     char *response = xasprintf("Not found the device.");
 
     ovs_mutex_lock(&dpdk_mutex);
- 
+
     LIST_FOR_EACH (dev, list_node, &dpdk_list) {
         ovs_mutex_lock(&dev->mutex);
         if (strcmp(argv[1], netdev_get_name(&dev->up)) == 0) {
@@ -2981,9 +2981,9 @@ netdev_dpdk_reconnect(struct unixctl_conn *conn, int argc OVS_UNUSED,
 
             err = rte_vhost_driver_start(dev->vhost_id);
             response = err ? xasprintf("rte_vhost_driver_start failed for vhost user port'%s'",
-                                       netdev_get_name(&dev->up))
-                           : xasprintf("rte_vhost_driver_start successed for device '%s'",
-                                       netdev_get_name(&dev->up));
+                    netdev_get_name(&dev->up))
+                : xasprintf("rte_vhost_driver_start successed for device '%s'",
+                        netdev_get_name(&dev->up));
 
             ovs_mutex_unlock(&dev->mutex);
             break;
@@ -3257,8 +3257,8 @@ netdev_dpdk_class_init(void)
                                  "[netdev]", 0, 1,
                                  netdev_dpdk_get_mempool_info, NULL);
         unixctl_command_register("netdev-dpdk/reconnect",
-                                 "netdev", 1, 1,
-                                 netdev_dpdk_reconnect, NULL);
+                "netdev", 1, 1,
+                netdev_dpdk_reconnect, NULL);
 
         ovsthread_once_done(&once);
     }
@@ -3766,7 +3766,7 @@ netdev_dpdk_vhost_client_reconfigure(struct netdev *netdev)
             err = rte_vhost_driver_start(dev->vhost_id);
             if (err) {
                 VLOG_ERR("rte_vhost_driver_start failed for vhost user "
-                         "client port: %s\n", dev->up.name);
+                    "client port: %s\n", dev->up.name);
                 goto unlock;
             }
         }

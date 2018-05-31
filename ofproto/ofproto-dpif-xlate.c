@@ -22,6 +22,8 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <sys/socket.h>
+#include <linux/sockios.h>
+#include <net/if_arp.h>
 
 #include "bfd.h"
 #include "bitmap.h"
@@ -66,6 +68,7 @@
 #include "tunnel.h"
 #include "util.h"
 #include "uuid.h"
+#include "netdev-linux.h"
 
 COVERAGE_DEFINE(xlate_actions);
 COVERAGE_DEFINE(xlate_actions_oversize);
@@ -3129,7 +3132,7 @@ static int
 tnl_route_lookup_flow(const struct xlate_ctx *ctx,
                       const struct flow *oflow,
                       struct in6_addr *ip, struct in6_addr *src,
-                      struct xport **out_port)
+                      char out_port[])
 {
     char out_dev[IFNAMSIZ];
     struct xbridge *xbridge;
@@ -3141,13 +3144,18 @@ tnl_route_lookup_flow(const struct xlate_ctx *ctx,
         return -ENOENT;
     }
 
+    //here out_dev is p5p1, which is kernel port has tnl src ip
+    ovs_strlcpy(out_port, out_dev, IFNAMSIZ);
+
     if (ipv6_addr_is_set(&gw) &&
         (!IN6_IS_ADDR_V4MAPPED(&gw) || in6_addr_get_mapped_ipv4(&gw))) {
         *ip = gw;
     } else {
         *ip = dst;
     }
+    return 0;
 
+#if 0
     HMAP_FOR_EACH (xbridge, hmap_node, &ctx->xcfg->xbridges) {
         if (!strncmp(xbridge->name, out_dev, IFNAMSIZ)) {
             struct xport *port;
@@ -3161,6 +3169,7 @@ tnl_route_lookup_flow(const struct xlate_ctx *ctx,
         }
     }
     return -ENOENT;
+#endif
 }
 
 static int
@@ -3290,13 +3299,44 @@ propagate_tunnel_data_to_flow(struct xlate_ctx *ctx, struct eth_addr dmac,
 }
 
 static int
+get_etheraddr(const char *netdev_name, struct eth_addr *ea)
+{
+    struct ifreq ifr;
+    int hwaddr_family;
+    int error;
+
+    memset(&ifr, 0, sizeof ifr);
+    ovs_strzcpy(ifr.ifr_name, netdev_name, sizeof ifr.ifr_name);
+    //COVERAGE_INC(netdev_get_hwaddr);
+    error = af_inet_ioctl(SIOCGIFHWADDR, &ifr);
+    if (error) {
+        /* ENODEV probably means that a vif disappeared asynchronously and
+         * hasn't been removed from the database yet, so reduce the log level
+         * to INFO for that case. */
+        VLOG(error == ENODEV ? VLL_INFO : VLL_ERR,
+             "ioctl(SIOCGIFHWADDR) on %s device failed: %s",
+             netdev_name, ovs_strerror(error));
+        return error;
+    }
+    hwaddr_family = ifr.ifr_hwaddr.sa_family;
+    if (hwaddr_family != AF_UNSPEC && hwaddr_family != ARPHRD_ETHER &&
+        hwaddr_family != ARPHRD_NONE) {
+        VLOG_INFO("%s device has unknown hardware address family %d",
+                  netdev_name, hwaddr_family);
+        return EINVAL;
+    }
+    memcpy(ea, ifr.ifr_hwaddr.sa_data, ETH_ADDR_LEN);
+    return 0;
+}
+
+static int
 native_tunnel_output(struct xlate_ctx *ctx, const struct xport *xport,
                      const struct flow *flow, odp_port_t tunnel_odp_port,
                      bool truncate)
 {
     struct netdev_tnl_build_header_params tnl_params;
     struct ovs_action_push_tnl tnl_push_data;
-    struct xport *out_dev = NULL;
+    char out_dev[IFNAMSIZ];
     ovs_be32 s_ip = 0, d_ip = 0;
     struct in6_addr s_ip6 = in6addr_any;
     struct in6_addr d_ip6 = in6addr_any;
@@ -3322,13 +3362,14 @@ native_tunnel_output(struct xlate_ctx *ctx, const struct xport *xport,
         xlate_report(ctx, OFT_WARN, "native tunnel routing failed");
         return err;
     }
-
     xlate_report(ctx, OFT_DETAIL, "tunneling to %s via %s",
                  ipv6_string_mapped(buf_dip6, &d_ip6),
-                 netdev_get_name(out_dev->netdev));
+                 out_dev);
 
     /* Use mac addr of bridge port of the peer. */
-    err = netdev_get_etheraddr(out_dev->netdev, &smac);
+    /* Here we do not use ovs bridge tap port, we use kernel pf port instead. */
+    err = get_etheraddr(out_dev, &smac);
+    //err = netdev_get_etheraddr(out_dev->netdev, &smac);
     if (err) {
         xlate_report(ctx, OFT_WARN,
                      "tunnel output device lacks Ethernet address");
@@ -3340,16 +3381,18 @@ native_tunnel_output(struct xlate_ctx *ctx, const struct xport *xport,
         s_ip = in6_addr_get_mapped_ipv4(&s_ip6);
     }
 
-    err = tnl_neigh_lookup(out_dev->xbridge->name, &d_ip6, &dmac);
+    //err = tnl_neigh_lookup(out_dev->xbridge->name, &d_ip6, &dmac);
+    /* For now, the packet came from bridge is the only tunnel bridge. */
+    err = tnl_neigh_lookup(ctx->xbridge->name, &d_ip6, &dmac);
     if (err) {
         xlate_report(ctx, OFT_DETAIL,
                      "neighbor cache miss for %s on bridge %s, "
                      "sending %s request",
-                     buf_dip6, out_dev->xbridge->name, d_ip ? "ARP" : "ND");
+                     buf_dip6, ctx->xbridge->name, d_ip ? "ARP" : "ND");
         if (d_ip) {
-            tnl_send_arp_request(ctx, out_dev, smac, s_ip, d_ip);
+            //tnl_send_arp_request(ctx, out_dev, smac, s_ip, d_ip);
         } else {
-            tnl_send_nd_request(ctx, out_dev, smac, &s_ip6, &d_ip6);
+            //tnl_send_nd_request(ctx, out_dev, smac, &s_ip6, &d_ip6);
         }
         return err;
     }
@@ -3358,7 +3401,7 @@ native_tunnel_output(struct xlate_ctx *ctx, const struct xport *xport,
         struct xc_entry *entry;
 
         entry = xlate_cache_add_entry(ctx->xin->xcache, XC_TNL_NEIGH);
-        ovs_strlcpy(entry->tnl_neigh_cache.br_name, out_dev->xbridge->name,
+        ovs_strlcpy(entry->tnl_neigh_cache.br_name, ctx->xbridge->name,
                     sizeof entry->tnl_neigh_cache.br_name);
         entry->tnl_neigh_cache.d_ipv6 = d_ip6;
     }
@@ -3374,7 +3417,7 @@ native_tunnel_output(struct xlate_ctx *ctx, const struct xport *xport,
         return err;
     }
     tnl_push_data.tnl_port = tunnel_odp_port;
-    tnl_push_data.out_port = out_dev->odp_port;
+    tnl_push_data.out_port = tunnel_odp_port;
 
     /* After tunnel header has been added, MAC and IP data of flow and
      * base_flow need to be set properly, since there is not recirculation
@@ -3418,7 +3461,7 @@ native_tunnel_output(struct xlate_ctx *ctx, const struct xport *xport,
         entry->tunnel_hdr.hdr_size = tnl_push_data.header_len;
         entry->tunnel_hdr.operation = ADD;
 
-        patch_port_output(ctx, xport, out_dev);
+        //patch_port_output(ctx, xport, out_dev);
 
         /* Similar to the stats update in revalidation, the x_cache entries
          * are populated by the previous translation are used to update the
