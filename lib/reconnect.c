@@ -702,3 +702,12 @@ reconnect_may_retry(struct reconnect *fsm)
     }
     return may_retry;
 }
+
+bool reconnect_is_ovsdb(struct reconnect *rec){
+    if(strstr(rec->name, "db.sock") != NULL){
+        return true;
+    }else{
+        return false;
+    }
+}
+
