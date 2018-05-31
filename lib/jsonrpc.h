@@ -106,6 +106,8 @@ void jsonrpc_session_close(struct jsonrpc_session *);
 void jsonrpc_session_run(struct jsonrpc_session *);
 void jsonrpc_session_wait(struct jsonrpc_session *);
 
+char *jsonrpc_auto_reconnect_db(char *s);
+
 size_t jsonrpc_session_get_backlog(const struct jsonrpc_session *);
 const char *jsonrpc_session_get_name(const struct jsonrpc_session *);
 

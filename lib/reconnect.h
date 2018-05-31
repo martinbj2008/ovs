@@ -81,6 +81,8 @@ void reconnect_connect_failed(struct reconnect *, long long int now,
                               int error);
 void reconnect_activity(struct reconnect *, long long int now);
 
+bool reconnect_is_ovsdb(struct reconnect *rec);
+
 enum reconnect_action {
     RECONNECT_CONNECT = 1,
     RECONNECT_DISCONNECT,
