@@ -385,14 +385,6 @@ if_notifier_changed(struct if_notifier *notifier OVS_UNUSED)
     seq_wait(ifaces_changed, last_ifaces_changed);
     return changed;
 }
-
-static void vswitchd_db_auto_reconnect(struct unixctl_conn *conn, int argc OVS_UNUSED,
-                              const char *argv[] OVS_UNUSED, void *_s OVS_UNUSED){
-    const char *auto_reconnect = argv[1];
-    char * rst = jsonrpc_auto_reconnect_db(auto_reconnect);
-    unixctl_command_reply(conn, rst);
-}
-
 
 /* Public functions. */
 
@@ -405,9 +397,9 @@ bridge_init(const char *remote)
     /* Create connection to database. */
     idl = ovsdb_idl_create(remote, &ovsrec_idl_class, true, true);
     idl_seqno = ovsdb_idl_get_seqno(idl);
-    char lock_name[64] = {0};
-    sprintf(lock_name, "ovs_vswitchd_%u", getpid());
-    ovsdb_idl_set_lock(idl, "ovs_vswitchd");
+    char idl_lock_name[64] = {0};
+    sprintf(idl_lock_name, "ovs_vswitchd_%u", getpid());
+    ovsdb_idl_set_lock(idl, idl_lock_name);
     ovsdb_idl_verify_write_only(idl);
 
     ovsdb_idl_omit_alert(idl, &ovsrec_open_vswitch_col_cur_cfg);
@@ -492,9 +484,6 @@ bridge_init(const char *remote)
                              bridge_unixctl_dump_flows, NULL);
     unixctl_command_register("bridge/reconnect", "[bridge]", 0, 1,
                              bridge_unixctl_reconnect, NULL);
-    unixctl_command_register("ovsdb-tool/auto-reconnect", "true/false", 1, 1,
-                             vswitchd_db_auto_reconnect, NULL);
-
     lacp_init();
     bond_init();
     cfm_init();
@@ -3486,7 +3475,7 @@ static void
 bridge_ofproto_controller_for_mgmt(const struct bridge *br,
                                    struct ofproto_controller *oc)
 {
-    oc->target = xasprintf("punix:%s/%s.%u.mgmt", ovs_rundir(), br->name, getpid());
+    oc->target = xasprintf("punix:%s/%s.mgmt", ovs_rundir(), br->name);
     oc->max_backoff = 0;
     oc->probe_interval = 60;
     oc->band = OFPROTO_OUT_OF_BAND;
@@ -3707,8 +3696,8 @@ bridge_configure_remotes(struct bridge *br,
         struct sset snoops;
 
         sset_init(&snoops);
-        sset_add_and_free(&snoops, xasprintf("punix:%s/%s.%u.snoop",
-                                             ovs_rundir(), br->name, getpid()));
+        sset_add_and_free(&snoops, xasprintf("punix:%s/%s.snoop",
+                                             ovs_rundir(), br->name));
         ofproto_set_snoops(br->ofproto, &snoops);
         sset_destroy(&snoops);
     }

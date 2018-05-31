@@ -58,8 +58,6 @@ static struct jsonrpc_msg *jsonrpc_parse_received_message(struct jsonrpc *);
 static void jsonrpc_cleanup(struct jsonrpc *);
 static void jsonrpc_error(struct jsonrpc *, int error);
 
-static bool auto_reconnect = true;
-
 /* This is just the same as stream_open() except that it uses the default
  * JSONRPC port if none is specified. */
 int
@@ -956,9 +954,6 @@ jsonrpc_session_run(struct jsonrpc_session *s)
 
     switch (reconnect_run(s->reconnect, time_msec())) {
     case RECONNECT_CONNECT:
-        if(auto_reconnect == false && reconnect_is_ovsdb(s->reconnect)){
-            break;
-        }
         jsonrpc_session_connect(s);
         break;
 
@@ -979,20 +974,6 @@ jsonrpc_session_run(struct jsonrpc_session *s)
             jsonrpc_send(s->rpc, request);
         }
         break;
-    }
-}
-
-char *jsonrpc_auto_reconnect_db(char *s) {
-    if(strcmp(s, "true") == 0 && auto_reconnect == false){
-        auto_reconnect = true;
-    }else if(strcmp(s, "false") == 0 && auto_reconnect == true){
-        auto_reconnect = false;
-    }
-
-    if(auto_reconnect){
-        return "ovsdb auto reconnect is true.";
-    }else{
-        return "ovsdb auto reconnect is false.";
     }
 }
 
