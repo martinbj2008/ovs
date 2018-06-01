@@ -336,11 +336,13 @@ static void send_arp_subnet(char *route, int mask){
     uint32_t sub_addr = (1 << (32 - mask)) - 1;
     int i = 0;
     struct in_addr in;
+    char ipaddr[16] = {0};
     memset(&in, 0, sizeof(struct in_addr));
 
     for(i = 1; i < sub_addr; i++){
         in.s_addr = htonl(rt + i);
-        send_arp(inet_ntoa(in));
+        inet_ntop(AF_INET, (void*)&in, ipaddr, sizeof(ipaddr));
+        send_arp(ipaddr);
     }
 }
 
@@ -380,18 +382,18 @@ static void ovs_route_add_subnet(const char *bridge, char *route, int mask){
     in_addr_t rt = ntohl(inet_addr(route));
     uint32_t sub_addr = (1 << (32 - mask)) - 1;
     int i = 0;
-    char *ip;
+    char ipaddr[16] = {0};
     struct in_addr in;
     memset(&in, 0, sizeof(struct in_addr));
     char mac[MACLEN] = {0};
 
     for(i = 1; i < sub_addr; i++){
         in.s_addr = htonl(rt + i);
-        ip = inet_ntoa(in);
+        inet_ntop(AF_INET, (void*)&in, ipaddr, sizeof(ipaddr));
         memset(mac, 0, MACLEN);
-        get_mac(ip, mac);
+        get_mac(ipaddr, mac);
         if(strlen(mac)){
-            ovs_route_add(bridge, ip, mac);
+            ovs_route_add(bridge, ipaddr, mac);
         }
     }
 }
