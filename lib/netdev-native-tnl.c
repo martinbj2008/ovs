@@ -192,7 +192,6 @@ udp_extract_tnl_md(struct dp_packet *packet, struct flow_tnl *tnl,
     }
 
     if (udp->udp_csum) {
-#if 0
         if (OVS_UNLIKELY(!dp_packet_l4_checksum_valid(packet))) {
             uint32_t csum;
             if (netdev_tnl_is_header_ipv6(dp_packet_data(packet))) {
@@ -209,7 +208,6 @@ udp_extract_tnl_md(struct dp_packet *packet, struct flow_tnl *tnl,
                 return NULL;
             }
         }
-#endif
         tnl->flags |= FLOW_TNL_F_CSUM;
     }
 

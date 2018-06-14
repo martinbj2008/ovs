@@ -643,7 +643,7 @@ miniflow_extract(struct dp_packet *packet, struct miniflow *dst)
     ovs_be16 ct_tp_src = 0, ct_tp_dst = 0;
 
     /* Metadata. */
-    if (md->tunnel.tun_id != 0) {
+    if (flow_tnl_dst_is_set(&md->tunnel)) {
         miniflow_push_words(mf, tunnel, &md->tunnel,
                             offsetof(struct flow_tnl, metadata) /
                             sizeof(uint64_t));
