@@ -185,7 +185,7 @@ ovsrcu_is_quiescent(void)
 void
 ovsrcu_synchronize(void)
 {
-    unsigned int warning_threshold = 1000;
+    unsigned int warning_threshold = 10;
     uint64_t target_seqno;
     long long int start;
 
