@@ -1,0 +1,62 @@
+#!/bin/sh
+
+function iptohex() {
+    IFS=.
+    _ip=$1
+    for str in $_ip
+    do
+        printf "%02X" $str
+    done
+}
+
+function sendarp(){
+    _dev=$1
+
+    deault_gw=`ip route show |grep default|gawk '{print $3}'`
+    ping -c 1 $deault_gw >> /dev/null &
+
+    net=`ip route show dev $_dev |grep kernel | gawk '{print $1}'| gawk -F '/' '{print $1}'`
+    net_hex=`iptohex $net`
+    net_dig=`echo "ibase=16;obase=A;$net_hex"|bc`
+
+    mask=`ip route show dev bond4 |grep kernel | gawk '{print $1}'| gawk -F '/' '{print $2}'`
+    mask=`expr 32 - $mask`
+
+    mask_dig=`echo 1 | gawk '{print lshift($0, lf)}' lf="$mask"`
+    mask_dig=`expr $mask_dig - 2`
+
+
+    i=1
+    while [ $i -le $mask_dig ];do
+        ip_hex=`echo "ibase=A;obase=16; $net_dig + $i"|bc`
+        echo $ip_hex
+        ping -c 1 -I $_dev 0x$ip_hex >> /dev/null &
+        i=`expr $i + 1`
+    done
+}
+
+function confarp() {
+    _br=$1
+    pid=`ps -ax |grep ovs-vswitchd |grep -v "grep"| grep -v "monitoring"|gawk '{print $1}'`
+
+    deault_gw=`ip route show |grep default|gawk '{print $3}'`
+    mac=`arp -n |grep $deault_gw|gawk '{print $3}'`
+    ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $deault_gw $mac
+
+    arp_cnt=`arp -n |grep -v incomplete |grep bond4|wc -l`
+    i=1
+    while [ $i -le $arp_cnt ];do
+        ip=`arp -n |grep -v incomplete |grep bond4|gawk '{print $1}'|sed -n "${i}p"`
+        mac=`arp -n |grep -v incomplete |grep bond4|gawk '{print $3}'|sed -n "${i}p"`
+        echo $ip $mac
+        ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $ip $mac
+        i=`expr $i + 1`
+    done
+}
+
+br=$1
+dev=$2
+
+sendarp $dev
+sleep 1
+confarp $br $dev
