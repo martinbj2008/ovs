@@ -1,0 +1,489 @@
+#!/bin/sh
+active_pid="/usr/local/var/run/openvswitch/ovs-vswitchd-active.pid"
+active_log="/usr/local/var/log/openvswitch/ovs-vswitchd-active.log"
+
+backup_pid="/usr/local/var/run/openvswitch/ovs-vswitchd-backup.pid"
+backup_log="/usr/local/var/log/openvswitch/ovs-vswitchd-backup.log"
+
+br_name="br-dpdk"
+ovs_conf="/etc/openvswitch/ovs-dpdk.conf"
+
+host_ip=""
+ipam_ip=""
+ipam_port=""
+
+date=`date +"%Y-%m-%d--%H:%m:%S"`
+log_file="/usr/local/var/log/openvswitch/ovs-hotupgrade-${date}.log"
+
+curr_prefix=`ovs-vsctl --no-wait get Open_vSwitch . other_config:dpdk-extra|gawk '{print $2}'|sed 's/\"//g'`
+
+if [ "$curr_prefix" == "ovs-active" ];then
+    curr_log="$active_log"
+    curr_pid="$active_pid"
+    curr_vf1=`lspci|grep  Virtual | gawk '{print $1}' | sed -n '1p'`
+    curr_vf2=`lspci|grep  Virtual | gawk '{print $1}' | sed -n '3p'`
+    curr_dpid=`ovs-vsctl get bridge br-dpdk datapath_id|sed 's/\"//g'`
+    curr_mode="active"
+    
+    next_log="$backup_log"
+    next_pid="$backup_pid"
+    next_vf1=`lspci|grep  Virtual | gawk '{print $1}' | sed -n '2p'`
+    next_vf2=`lspci|grep  Virtual | gawk '{print $1}' | sed -n '4p'`
+    next_dpid=`ovs-vsctl get bridge br-dpdk datapath_id|sed 's/\"//g' | rev`
+    next_prefix="ovs-backup"
+    next_mode="backup"
+    
+elif [ "$curr_prefix" == "ovs-backup" ];then
+    curr_log="$backup_log"
+    curr_pid="$backup_pid"
+    curr_vf1=`lspci|grep  Virtual | gawk '{print $1}' | sed -n '2p'`
+    curr_vf2=`lspci|grep  Virtual | gawk '{print $1}' | sed -n '4p'`
+    curr_dpid=`ovs-vsctl get bridge br-dpdk datapath_id|sed 's/\"//g' | rev`
+    curr_mode="backup"
+    
+    next_log="$active_log"
+    next_pid="$active_pid"
+    next_vf1=`lspci|grep  Virtual | gawk '{print $1}' | sed -n '1p'`
+    next_vf2=`lspci|grep  Virtual | gawk '{print $1}' | sed -n '3p'`
+    next_dpid=`ovs-vsctl get bridge br-dpdk datapath_id|sed 's/\"//g'`
+    next_prefix="ovs-active"
+    next_mode="active"
+fi
+
+ovsdb_pid=`ps -ax |grep ovsdb-server |grep -v "grep"| grep -v "monitoring"|gawk '{print $1}'`
+curr_ovs_pid=`cat $curr_pid`
+next_ovs_pid=0
+
+#1--prapare,2--upgrade,3--finish
+curr_stage=1
+
+
+function log(){
+    func=$1
+    info=$2
+    date=`date +"%Y-%m-%d--%H:%m:%S"`
+    echo "${date}-{$func}  $info" >> $log_file
+}
+
+function judgestr(){
+    func=$1
+    key=$2
+    value=$3
+    succlog=$4
+    
+    if [ -z "$value" ];then
+        log $func "Error get $key"
+    elif [ -n "$succlog" ];then
+        log $func $succlog
+    fi
+}
+
+function ipam_lock(){
+    rst=$(curl -H "Content-Type:application/json" -o /dev/null -X POST -w %{http_code} -s -d '{"host_lock":{"host": "'${host_ip}'", "expiration":600}}' http://${ipam_ip}:${ipam_port}/v1.0/host/lock)
+    if [ $rst -eq 200 ];then
+        log "prepare" "Host $host_ip has been lock by ipam ${ipam_ip}:${ipam_port}, rst $rst"
+    else
+        log "prepare" "Host $host_ip can not lock by ipam ${ipam_ip}:${ipam_port}, rst $rst"
+        return 1
+    fi
+}
+
+function ipam_unlock(){
+    rst=$(curl -X DELETE -o /dev/null -s -w %{http_code} http://${ipam_ip}:${ipam_port}/v1.0/host/lock/$host_ip)
+    if [ $rst -eq 200 ];then
+        log "finish" "Host $host_ip has been unlock by ipam ${ipam_ip}:${ipam_port}"
+    else
+        log "finish" "Host $host_ip has been unlock by ipam ${ipam_ip}:${ipam_port}, Please try to use \"curl -X DELETE http://${ipam_ip}:${ipam_port}/v1.0/host/lock/$host_ip\" to unlock it"
+        return 1
+    fi
+}
+
+function add_veth_bak(){
+    ns_cnt=`ip netns list |wc -l`
+    log "prepare" "Max namespace cnt $ns_cnt"
+    
+    i=1
+    while [ $i -le $ns_cnt ];do
+        ns_id=`ip netns list | gawk '{print $3}'| gawk -F ')' '{print $1}'|sed -n '${i}p'`
+        ns_name=`ip netns list | gawk '{print $1}'|sed -n '${i}p'`
+        log "prepare" "namespace $ns_name id $ns_id"
+        
+        mac=`ovs-vsctl get interface outer34 external_ids:attached-mac|sed 's/\"//g'`
+        iface_id=`ovs-vsctl get interface outer34 external_ids:iface-id|sed 's/\"//g'`
+        subid=`ovs-vsctl get interface outer34 external_ids:subnet-id|sed 's/\"//g'`
+        vni=`ovs-vsctl get interface outer34 external_ids:vni|sed 's/\"//g'`
+        ovs-vsctl --no-wait del-port outer${ns_id}
+        ip link add outer${ns_id}-bak type veth peer name inner${ns_id}-bak
+        ip link set outer${ns_id}-bak up
+        ip link set inner${ns_id}-bak netns $ns_name
+        ip netns exec $ns_name ip link set inner${ns_id}-bak up
+        ip netns exec $ns_name brctl addif br-netns inner${ns_id}-bak
+        ovs-vsctl --no-wait add-port $br-name outer${ns_id}-bak -- set interface outer${ns_id}-bak type=system
+        new_iface=`ovs-vsctl get interface outer${ns_id}-bak _uuid`
+        ovs-vsctl set interface outer${ns_id}-bak external_ids:vni=$vni external_ids:subnet-id=$subid external_ids:attached-mac=$mac external_ids:iface-id=$new_iface
+        log "prepare" "namespace $ns_name id $ns_id add veth pair backup successfully"
+        i=`expr  $i + 1`
+    done
+}
+
+function delete_veth_bak(){
+    ns_cnt=`ip netns list |wc -l`
+    i=1
+    while [ $i -le $ns_cnt ];do
+        ns_id=`ip netns list | gawk '{print $3}'| gawk -F ')' '{print $1}'|sed -n '${i}p'`
+        ns_name=`ip netns list | gawk '{print $1}'|sed -n '${i}p'`
+        log "delete_veth_bak" "ns $ns_name id $ns_id is going to delete veth pair backup"
+        mac=`ovs-vsctl get interface outer${ns_id}-bak external_ids:attached-mac|sed 's/\"//g'`
+        subid=`ovs-vsctl get interface outer${ns_id}-bak external_ids:subnet-id|sed 's/\"//g'`
+        vni=`ovs-vsctl get interface outer${ns_id}-bak external_ids:vni|sed 's/\"//g'`
+        ovs-vsctl --no-wait add-port $br-name outer${ns_id} -- set interface outer${ns_id} type=system
+        new_iface=`ovs-vsctl get interface outer${ns_id} _uuid`
+        ovs-vsctl set interface outer${ns_id} external_ids:vni=$vni external_ids:subnet-id=$subid external_ids:attached-mac=$mac external_ids:iface-id=$new_iface
+        ovs-vsctl --no-wait del-port outer${ns_id}-bak
+        ip link del outer${ns_id}-bak
+        ip netns exec $ns_name ip link del inner${ns_id}-bak
+        log "delete_veth_bak" "ns $ns_name id $ns_id delete veth pair backup finsihed"
+        i=`expr  $i + 1`
+    done
+}
+
+function sys_env_check(){
+    vfcnt=`lspci |grep  Virtual | gawk '{print $1}'|wc -l`
+    if [ $vfcnt -ne 4 ];then
+        echo "Error vf count is $vfcnt"
+        log "sys_env_check" "Error vf count is $vfcnt"
+        return 1
+    fi
+    
+    [ -z "$host_ip" ] || [ -z "$ipam_ip" ] || [ -z "$ipam_port" ] && echo "host_ip ipam_ip host_port must be set before upgrade" && return 1
+    
+    free_huge=`cat /sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages`
+    if [ $free_huge -le 1024 ];then
+        echo "No enough free hugepage is system, ovs new process need 1024, the free is $free_huge"
+        log "sys_env_check" "No enough free hugepage is system, ovs new process need 1024, the free is $free_huge"
+        return 1
+    fi
+    
+    if [ ! -e $ovs_conf ];then
+        echo "Ovs configuration file \"$ovs_conf\" is not exist"
+        log "sys_env_check" "Ovs configuration file \"$ovs_conf\" is not exist"
+        return 1
+    fi
+    
+    if [ -z "$curr_ovs_pid" ];then
+        echo "There is no ovs-vswitchd process running"
+        log "sys_env_check" "There is no ovs-vswitchd process running"
+        return 1
+    fi
+        
+    if [ -z "$ovsdb_pid" ];then
+        echo "There is no ovsdb-server process running"
+        log "sys_env_check" "There is no ovsdb-server process running"
+        return 1
+    fi
+}
+
+function check_stage(){
+    stg=$1
+    if [ $stg -ne $curr_stage ];then
+        echo "Error cmd, Must be executed in order \"prepare upgrade finsish\""
+        return 1
+    fi
+    return 0
+}
+
+#Prepare configuration before upgrade 
+function prepare_upgrade(){
+    sys_env_check
+    [ $? -ne 0 ] && return 1
+    
+    check_stage 1
+    [ $? -ne 0 ] && return 1
+    
+    log "prepare" "Starting ovs hot upgrade prepare process"
+
+    ipam_lock
+    [ $? -ne 0 ] && return 1
+    
+    ovs-vsctl --no-wait  set interface dpdk1 options:dpdk-devargs=0000:$next_vf1
+    [ $? -ne 0 ] && log "prepare" "set $pid dpdk-devargs=0000:$next_vf1 error"
+    ovs-vsctl --no-wait  set interface dpdk2 options:dpdk-devargs=0000:$next_vf2
+    [ $? -ne 0 ] && log "prepare" "set $pid dpdk-devargs=0000:$next_vf2 error"
+    
+    log "prepare" "Vf has been set to $next_vf1 $next_vf2"
+
+    ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${curr_ovs_pid}.ctl  ovsdb-tool/auto-reconnect true
+    [ $? -ne 0 ] && log "prepare" "set $curr_ovs_pid ovsdb-tool/auto-reconnect true error"
+    
+    ovs-vsctl --no-wait set Open_vSwitch . other_config:vhostuser-no-autoconnect=true
+    
+    ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${curr_ovs_pid}.ctl  ovsdb-tool/auto-reconnect false
+    [ $? -ne 0 ] && log "prepare" "set $curr_ovs_pid ovsdb-tool/auto-reconnect false error"
+    
+    ovs-appctl -t ovsdb-server ovsdb-server/reconnect
+    [ $? -ne 0 ] && log "prepare" "set $curr_ovs_pid ovsdb-server/reconnect error"
+    log "prepare" "The ovs-vswitchd ${curr_ovs_pid} has disconnect the ovsdb"
+    
+    ovs-vsctl --no-wait set bridge br-dpdk other-config:datapath-id=$next_dpid
+    ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-extra="--file-prefix $next_prefix"
+    
+    sed -ie 's/OVS_MODE=\"$curr_mode\"/OVS_MODE=\"$next_mode\"/g' $ovs_conf
+    log "upgrade" "The $ovs_conf OVS_MODE has been change from $curr_mode to $next_mode"
+    
+    add_veth_bak
+    
+    curr_stage=2
+    
+    log "prepare" "Ovs hot upgrade prepare process has finished"
+}
+
+function swap_vhost_user(){
+    new_pid=$1
+    exe_port=$2
+    log "swap_vhost_user" "parameter new_pid $new_pid, exe_port $exe_port"
+    port_cnt=`ovs-vsctl show |grep -C 1 dpdkvhostuserclient |grep Interface | gawk '{print $2}'|sed 's/\"//g' | wc -l`
+    log "swap_vhost_user" "port_cnt $port_cnt"
+    
+    i=1
+    k=0
+    while [ $i -le $port_cnt ];do
+        port=`ovs-vsctl show |grep -C 1 dpdkvhostuserclient |grep Interface | gawk '{print $2}'|sed 's/\"//g' |sed -n "${i}p"`
+        if [[ "$exe_port" == "all" || "$exe_port" == "$port" ]];then
+            mac=`ovs-vsctl get interface $port external_ids:attached-mac|sed 's/\"//g'|tr 'a-z' 'A-Z'`
+            vni=`ovs-vsctl get interface $port external_ids:vni|sed 's/\"//g'`
+            log "swap_vhost_user" "port $port mac $mac; vni $vni is starting to swap"
+            didicloud_filter del $mac $vni
+            didicloud_filter add $Mac $vni
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${new_pid}.ctl netdev-dpdk/reconnect $port
+            if [ $? -eq 0 ];then
+                log "swap_vhost_user" "Port $port has swap to vswitch $new_pid"
+            else
+                log "swap_vhost_user" "Port $port swap to vswitch $new_pid ERROR"
+            fi
+            k=1
+        fi
+        if [ $2 == "all" ];then
+            sleep 1
+        fi
+        i=`expr  $i + 1`
+    done
+    
+    if [ $k -eq 0 ];then
+        echo "Port $exe_port cannot be found"
+        log "swap_vhost_user" "Port $exe_port cannot be found"
+    fi
+}
+
+function upgrade_vhost_user(){
+    check_stage 2
+    [ $? -ne 0 ] && return 1
+    
+    log "upgrade" "Starting ovs hot upgrade process"
+    
+    exe_port=$1
+    log "upgrade" "parameter exe_port $exe_port"
+    
+    if [ $next_ovs_pid -eq 0 ];then
+        ovs-vswitchd --pidfile=$next_pid --log-file=$next_log --monitor --detach -vconsole:emer -vsyslog:err -vfile:info --mlockall --no-chdir >> /dev/null
+        next_ovs_pid=`cat $next_pid`  
+    fi
+    
+    log "upgrade" "new_pid $next_ovs_pid"
+
+    swap_vhost_user $next_ovs_pid $exe_port
+    
+    log "upgrade" "Ovs hot upgrade process has finished"
+}
+
+function upgrade_over(){
+    check_stage 2
+    [ $? -ne 0 ] && return 1
+    log "finish" "starting ovs hot upgrade over process"
+    
+    delete_veth_bak
+    
+    ovs-vsctl --no-wait set Open_vSwitch . other_config:vhostuser-no-autoconnect=false
+    
+    ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${curr_ovs_pid}.ctl  exit
+    [ $? -ne 0 ] && log "finish" "set $old_pid exit error"
+    
+    ipam_unlock
+    [ $? -ne 0 ] && return 1
+    
+    log "finish" "Ovs hot upgrade process has finished"
+    curr_stage=3
+}
+
+function reset_env(){
+    check_stage 3
+    [ $? -eq 0 ] && return 1
+
+    if [ -n "$next_ovs_pid" ];then  
+        ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${next_ovs_pid}.ctl  exit
+        log "reset" "ovs-vswitchd $next_ovs_pid has exit"
+        sleep 1    
+    fi
+    
+    ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-extra="--file-prefix $curr_prefix"
+    mode_str=`grep OVS_MODE $ovs_conf`
+    sed -ie 's/${mode_str}/OVS_MODE=\"$curr_mode\"/g' $ovs_conf
+    log "reset" "ovs-prefix has been set to active"
+    
+    ovs-vsctl --no-wait  set interface dpdk1 options:dpdk-devargs=0000:$curr_vf1
+    [ $? -ne 0 ] && log "reset_env" "set $curr_ovs_pid dpdk-devargs=0000:$curr_vf1 error" 
+    ovs-vsctl --no-wait  set interface dpdk2 options:dpdk-devargs=0000:$curr_vf2
+    [ $? -ne 0 ] && log "reset_env" "set $curr_ovs_pid dpdk-devargs=0000:$curr_vf2 error"
+    
+    log "reset" "Vf has been set to $curr_vf1 $curr_vf2"
+    
+    swap_vhost_user $curr_ovs_pid "all"
+
+    ovs-vsctl --no-wait set Open_vSwitch . other_config:vhostuser-no-autoconnect=false
+    ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${curr_ovs_pid}.ctl  ovsdb-tool/auto-reconnect true
+    [ $? -ne 0 ] && log "prepare" "set $curr_ovs_pid ovsdb-tool/auto-reconnect true error"
+    
+    ipam_unlock
+    [ $? -ne 0 ] && return 1
+    curr_stage=1
+}
+
+function usage(){
+    echo "USAGE: " 
+    echo "prepare                   Prepare the upgrade configuration"
+    echo "upgrade <port>            Upgrade one or all vhostuser port"
+    echo "finish                    End the hot upgrade process and set the old ovs-switchd exit"
+    echo "reset                     Reset the env to the status before upgrade when some error happens"
+    echo "all                       Include prepare upgrade finish,and swap all vhostuser"
+    echo "help                      Show the usage"
+    echo "show config               Show the configuration"
+    echo "show status               Show the current status"
+    echo "show vhostuser            Show all vhostuser port name"
+    echo "show log <line>           Show log info, <all>:show all log of this hotupgrade"
+    echo "set host_ip <ip>          Set the host ip address"
+    echo "set ipam_ip <ip>          Set the ipam ip address"
+    echo "set ipam_port <port>      Set the ipam port num"
+    echo "exit | quit               Quit this process"
+}
+
+function show_log(){
+    line=$1
+    if [ "$line" == "all" ];then
+        more $log_file
+    elif [[ "$line" =~ "^[0-9]+$" ]];then
+        tail -$line $log_file
+    else
+        tail -10 $log_file
+    fi
+}
+
+function show_vhostuser(){
+    ovs-vsctl show |grep -C 1 dpdkvhostuserclient |grep Interface | gawk '{print $2}'|sed 's/\"//g'
+}
+
+function show_status(){
+    echo "Current Ovs Pid is $curr_ovs_pid"
+    echo "Next Ovs Pid is $next_ovs_pid"
+    echo "Log file is $log_file"
+    echo "Curr stage is $curr_stage"
+}
+
+function show_config(){
+    echo "host ip: $host_ip"
+    echo "ipam_ip: $ipam_ip"
+    echo "ipam_port: $ipam_port"
+}
+
+function set_key_value(){
+    key=$1
+    value=$2
+    case $key in
+        "host_ip")
+            host_ip="$value"
+            ;;
+        "ipam_ip")
+            ipam_ip="$value"
+            ;;
+        "ipam_port")
+            ipam_port="$value"
+            ;;
+        *)
+            echo "Unkown Key $key, Please use \"help\" to get more info"
+            ;;
+    esac
+}
+
+function show_key_value(){
+    key=$1
+    case $key in
+        "config")
+            show_config
+            ;;
+        "status")
+            show_status
+            ;;
+        "vhostuser")
+            show_vhostuser
+            ;;
+        "log")
+            show_log $value
+            ;;
+        *)
+            echo "Unkown Key $key, Please use \"help\" to get more info"
+            ;;
+    esac
+}
+
+#main function
+
+#Disable TERM INT HUP signal
+trap "" TERM INT HUP
+
+while [ 1 ];
+do
+    _pname=$0
+    echo -e "\E[1;34m<ovs-hotupgrade> \E[0m\c"
+    read _process key value
+    
+    case $_process in
+        "help")
+            usage
+            ;;
+        "set")
+            set_key_value $key $value 
+            ;;
+        "show")
+            show_key_value $key 
+            ;;
+        "prepare")
+            prepare_upgrade
+            ;;
+        "upgrade")
+            upgrade_vhost_user $key
+            ;;
+        "finish")
+            upgrade_over
+            ;;
+        "all")
+            prepare_upgrade
+            upgrade_vhost_user "all"
+            upgrade_over
+            ;;
+        "reset")
+            reset_env
+            ;;
+        "quit" | "exit")
+            echo -e "Are you sure to quit the ovs hotupgrade?<YES/NO>\c"
+            read yesno
+            if [ "$yesno" == "YES" ];then
+                exit
+            fi
+            ;;
+        "")
+            ;;
+        *)
+            echo "Unkown Comand $_process, Please use \"help\" to get more info"
+            ;;
+    esac
+done
+
+
