@@ -176,11 +176,19 @@ start_daemon () {
 
     # log file
     install_dir "$logdir" "750"
-    set "$@" --log-file="$logdir/$daemon.log"
+    if test X"$daemon" = Xovs-vswitchd && test X"$OVS_MODE" != X; then
+        set "$@" --log-file="$logdir/$daemon-$OVS_MODE.log"
+    else
+        set "$@" --log-file="$logdir/$daemon.log"
+    fi
 
     # pidfile and monitoring
     install_dir "$rundir"
-    set "$@" --pidfile="$rundir/$daemon.pid"
+    if test X"$daemon" = Xovs-vswitchd && test X"$OVS_MODE" != X; then
+        set "$@" --pidfile="$rundir/$daemon-$OVS_MODE.pid"
+    else
+        set "$@" --pidfile="$rundir/$daemon.pid"
+    fi
     set "$@" --detach
     test X"$MONITOR" = Xno || set "$@" --monitor
 
@@ -231,8 +239,14 @@ start_daemon () {
 }
 
 stop_daemon () {
-    if test -e "$rundir/$1.pid"; then
-        if pid=`cat "$rundir/$1.pid"`; then
+    if test X"$1" = Xovs-vswitchd && test X"$OVS_MODE" != X; then
+        pidfile=$rundir/$1-$OVS_MODE.pid
+    else
+        pidfile=$rundir/$1.pid
+    fi
+
+    if test -e "$pidfile"; then
+        if pid=`cat "$pidfile"`; then
 
             graceful="EXIT .1 .25 .65 1"
             actions="TERM .1 .25 .65 1 1 1 1 \
@@ -278,8 +292,39 @@ stop_daemon () {
     log_success_msg "$1 is not running"
 }
 
+arp_is_learning () 
+{
+    if test X"$1" = Xovs-vswitchd && test X"$OVS_MODE" != X; then
+        pidfile=$rundir/$1-$OVS_MODE.pid
+    else
+        pidfile=$rundir/$1.pid
+    fi
+
+    if test -e "$pidfile"; then
+        if pid=`cat "$pidfile"`; then
+            ctlfile=$rundir/$1.$pid.ctl
+            test -e "$ctlfile" && Gw=`ip route show default | awk '/default/ {print $3}'` && ovs-appctl -t ctlfile tnl/route/show | grep $Gw
+        fi     
+    fi
+} >/dev/null 2>&1
+
+arp_check () 
+{
+    Gw=`ip route show default | awk '/default/ {print $3}'`
+    if arp_is_learning ovs-vswitchd; then
+        echo "Gateway $Gw arp has been learned by ovs-vswitchd"
+    else
+        echo "Gateway $Gw arp has not been learned by ovs-vswitchd"
+    fi
+}
+
 daemon_status () {
-    pidfile=$rundir/$1.pid
+    if test X"$1" = Xovs-vswitchd && test X"$OVS_MODE" != X; then
+        pidfile=$rundir/$1-$OVS_MODE.pid
+    else
+        pidfile=$rundir/$1.pid
+    fi
+
     if test -e "$pidfile"; then
         if pid=`cat "$pidfile"`; then
             if pid_exists "$pid"; then
@@ -298,7 +343,12 @@ daemon_status () {
 }
 
 daemon_is_running () {
-    pidfile=$rundir/$1.pid
+    if test X"$1" = Xovs-vswitchd && test X"$OVS_MODE" != X; then
+        pidfile=$rundir/$1-$OVS_MODE.pid
+    else
+        pidfile=$rundir/$1.pid
+    fi
+
     test -e "$pidfile" && pid=`cat "$pidfile"` && pid_exists "$pid" && pid_comm_check $1 $pid
 } >/dev/null 2>&1
 
