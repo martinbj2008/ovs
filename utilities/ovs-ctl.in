@@ -131,6 +131,31 @@ del_transient_ports () {
     done
 }
 
+set_dpdk_configs () {
+    if test X"$OVS_DPDK" = Xyes; then
+        if test x"$DPDK_INIT" != x; then
+            action "Configuring open vSwitch dpdk init" \
+                ovs_vsctl set Open_vSwitch . other_config:dpdk-init=$DPDK_INIT
+        fi
+        if test x"$DPDK_LCORE" != x; then
+            action "Configuring open vSwitch dpdk lcore mask" \
+                ovs_vsctl set Open_vSwitch . other_config:dpdk-lcore-mask=$DPDK_LCORE
+        fi
+        if test x"$DPDK_PMD_CPU" != x; then
+            action "Configuring open vSwitch dpdk pmd cpu mask" \
+                ovs_vsctl set Open_vSwitch . other_config:pmd-cpu-mask=$DPDK_PMD_CPU
+        fi
+        if test x"$DPDK_SOCK_MEM" != x; then
+            action "Configuring open vSwitch dpdk socket memory" \
+                ovs_vsctl set Open_vSwitch . other_config:dpdk-socket-mem=$DPDK_SOCK_MEM
+        fi
+        if test x"$VHOSTUSER_NO_AUTO_RECONNECT" != x; then
+            action "Configuring open vSwitch dpdk vhostuser reconnect" \
+                ovs_vsctl set Open_vSwitch . other_config:vhostuser-no-autoconnect=$VHOSTUSER_NO_AUTO_RECONNECT
+        fi
+    fi
+}
+
 do_start_ovsdb () {
     check_force_cores
 
@@ -173,6 +198,7 @@ do_start_ovsdb () {
         ovs_vsctl -- init -- set Open_vSwitch . db-version="$schemaver" \
             || return 1
         set_system_ids || return 1
+        set_dpdk_configs || return 1
         if test X"$DELETE_BRIDGES" = Xyes; then
             for bridge in `ovs_vsctl list-br`; do
                 ovs_vsctl del-br $bridge
@@ -212,7 +238,9 @@ add_managers () {
 do_start_forwarding () {
     check_force_cores
 
-    insert_mod_if_required || return 1
+    if test X"$OVS_DPDK" = Xno; then
+        insert_mod_if_required || return 1
+    fi
 
     if daemon_is_running ovs-vswitchd; then
         log_success_msg "ovs-vswitchd is already running"
@@ -347,6 +375,12 @@ set_defaults () {
     type_file=$etcdir/system-type.conf
     version_file=$etcdir/system-version.conf
 
+    conf_file=/etc/openvswitch/ovs-dpdk.conf
+
+    if test -e $conf_file; then  
+        source $conf_file
+    fi
+
     if test -e "$type_file" ; then
         SYSTEM_TYPE=`cat $type_file`
         SYSTEM_VERSION=`cat $version_file`
@@ -466,7 +500,7 @@ do
             usage
             ;;
         -V | --version)
-            echo "$0 (Open vSwitch) $VERSION"
+            echo "$0 (Open vSwitch@didi) $VERSION"
             exit 0
             ;;
         --external-id=*)
@@ -531,6 +565,9 @@ case $command in
         for daemon in `daemons`; do
             daemon_status $daemon || rc=$?
         done
+        if test X"$GW_ARP_CHECK" = Xyes; then
+            arp_check
+        fi
         exit $rc
         ;;
     version)
