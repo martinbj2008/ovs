@@ -315,7 +315,6 @@ tnl_neigh_cache_init(void)
     unixctl_command_register("tnl/arp/show", "", 0, 0, tnl_neigh_cache_show, NULL);
     unixctl_command_register("tnl/arp/set", "BRIDGE IP MAC", 3, 3, tnl_neigh_cache_add, NULL);
     unixctl_command_register("tnl/arp/flush", "", 0, 0, tnl_neigh_cache_flush, NULL);
-    unixctl_command_register("tnl/arp/update", "BRIDGE INTERFACE", 2, 2, tnl_neigh_cache_update, NULL);
     unixctl_command_register("tnl/neigh/show", "", 0, 0, tnl_neigh_cache_show, NULL);
     unixctl_command_register("tnl/neigh/set", "BRIDGE IP MAC", 3, 3, tnl_neigh_cache_add, NULL);
     unixctl_command_register("tnl/neigh/flush", "", 0, 0, tnl_neigh_cache_flush, NULL);
