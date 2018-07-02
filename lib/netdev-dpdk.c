@@ -2065,6 +2065,7 @@ static void netdev_dpdk_sg_show(struct unixctl_conn *conn, int argc OVS_UNUSED,
     char ipstr[16] = {0};
     int i = 0;
     struct netdev_dpdk *dev;
+    int exist_port = 0;
     
     ovs_mutex_lock(&dpdk_mutex);
 
@@ -2094,20 +2095,18 @@ static void netdev_dpdk_sg_show(struct unixctl_conn *conn, int argc OVS_UNUSED,
                     }
                 }
             }
-            ovs_mutex_unlock(&dev->mutex);
-            ovs_mutex_unlock(&dpdk_mutex);
-            unixctl_command_reply(conn, ds_cstr(&ds));
-            ds_destroy(&ds);
-            return;
+            exist_port = 1;
         }
         ovs_mutex_unlock(&dev->mutex);
     }
 
     ovs_mutex_unlock(&dpdk_mutex);
 
-    unixctl_command_reply(conn, "Not exist device.\n");  
-
-    unixctl_command_reply(conn, ds_cstr(&ds));
+    if(exist_port){
+        unixctl_command_reply(conn, ds_cstr(&ds));
+    }else{
+        unixctl_command_reply(conn, "Not exist device.\n"); 
+    }
     ds_destroy(&ds);
 }
 
