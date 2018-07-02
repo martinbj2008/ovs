@@ -46,7 +46,6 @@ lib_libopenvswitch_la_SOURCES = \
 	lib/colors.h \
 	lib/command-line.c \
 	lib/command-line.h \
-	lib/common.h \
 	lib/compiler.h \
 	lib/connectivity.c \
 	lib/connectivity.h \
@@ -234,8 +233,6 @@ lib_libopenvswitch_la_SOURCES = \
 	lib/simap.h \
 	lib/skiplist.c \
 	lib/skiplist.h \
-	lib/slb-rs.h \
-	lib/slb-rs.c \
 	lib/smap.c \
 	lib/smap.h \
 	lib/socket-util.c \
