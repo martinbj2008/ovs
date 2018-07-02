@@ -4302,6 +4302,7 @@ reload:
         if (unlikely(vhostuser_cpu_yield) && iter_packets > 32) {
             pthread_yield();
         }
+        rte_timer_manage();
     }
 
     poll_cnt = pmd_load_queues_and_ports(pmd, &poll_list);

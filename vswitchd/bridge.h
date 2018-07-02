@@ -28,4 +28,6 @@ void bridge_wait(void);
 
 void bridge_get_memory_usage(struct simap *usage);
 
+extern int slb_rs_exit(void);
+
 #endif /* bridge.h */

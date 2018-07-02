@@ -512,6 +512,7 @@ void
 bridge_exit(bool delete_datapath)
 {
     struct bridge *br, *next_br;
+    static bool slb_exited;
 
     if_notifier_destroy(ifnotifier);
     seq_destroy(ifaces_changed);
@@ -519,6 +520,11 @@ bridge_exit(bool delete_datapath)
         bridge_destroy(br, delete_datapath);
     }
     ovsdb_idl_destroy(idl);
+
+    if (!slb_exited) {
+	slb_rs_exit();
+    	slb_exited = true;
+    }
 }
 
 /* Looks at the list of managers in 'ovs_cfg' and extracts their remote IP
