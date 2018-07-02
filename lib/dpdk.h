@@ -40,4 +40,7 @@ const char *dpdk_get_vhost_sock_dir(void);
 bool dpdk_vhost_iommu_enabled(void);
 void print_dpdk_version(void);
 
+extern int slb_rs_init(void);
+extern int slb_rs_exit(void);
+
 #endif /* dpdk.h */

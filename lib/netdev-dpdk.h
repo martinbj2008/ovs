@@ -24,6 +24,10 @@
 struct dp_packet;
 extern bool vhostuser_no_autoconnect;
 
+/* slb-rs */
+extern void netdev_dpdk_slb_rs_in(struct dp_packet **, unsigned int );
+extern void netdev_dpdk_slb_rs_out(struct dp_packet **, unsigned int );
+
 #ifdef DPDK_NETDEV
 
 void netdev_dpdk_register(void);
