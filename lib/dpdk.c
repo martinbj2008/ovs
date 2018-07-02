@@ -25,7 +25,6 @@
 #include <rte_log.h>
 #include <rte_memzone.h>
 #include <rte_version.h>
-#include <rte_timer.h>
 #ifdef DPDK_PDUMP
 #include <rte_mempool.h>
 #include <rte_pdump.h>
@@ -426,7 +425,6 @@ dpdk_init__(const struct smap *ovs_other_config)
     if (result < 0) {
         ovs_abort(result, "Cannot init EAL");
     }
-    rte_timer_subsystem_init();
     argv_release(argv, argv_to_release, argc);
 
     /* Set the main thread affinity back to pre rte_eal_init() value */
@@ -467,7 +465,6 @@ void
 dpdk_init(const struct smap *ovs_other_config)
 {
     static bool enabled = false;
-    static bool slb_inited = false;
 
     vhostuser_no_autoconnect = smap_get_bool(ovs_other_config,
                                              "vhostuser-no-autoconnect",
@@ -491,11 +488,6 @@ dpdk_init(const struct smap *ovs_other_config)
         }
     } else {
         VLOG_INFO_ONCE("DPDK Disabled - Use other_config:dpdk-init to enable");
-    }
-
-    if (!slb_inited) {
-	slb_rs_init();
-    	slb_inited = true;
     }
 }
 

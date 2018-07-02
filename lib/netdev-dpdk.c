@@ -1377,22 +1377,6 @@ netdev_dpdk_get_config(const struct netdev *netdev, struct smap *args)
     return 0;
 }
 
-uint16_t 
-netdev_dpdk_lookup_by_port_type(void)
-    OVS_REQUIRES(dpdk_mutex)
-{
-    struct netdev_dpdk *dev;
-
-    LIST_FOR_EACH (dev, list_node, &dpdk_list) {
-        if ((dev->type == DPDK_DEV_ETH)
-		&& rte_eth_dev_is_valid_port(dev->port_id)) {
-            return dev->port_id;
-        }
-    }
-
-    return DPDK_ETH_PORT_ID_INVALID;
-}
-
 static struct netdev_dpdk *
 netdev_dpdk_lookup_by_port_id(dpdk_port_t port_id)
     OVS_REQUIRES(dpdk_mutex)
@@ -1912,9 +1896,6 @@ netdev_dpdk_vhost_rxq_recv(struct netdev_rxq *rxq,
 
     batch->count = nb_rx;
     dp_packet_batch_init_packet_fields(batch);
-
-    /* slb-rs hook before packet revc from vm */
-    netdev_dpdk_slb_rs_out(batch->packets, nb_rx);
 
     return 0;
 }
@@ -2477,9 +2458,6 @@ __netdev_dpdk_vhost_send(struct netdev *netdev, int qid,
 
     cnt = netdev_dpdk_qos_run(dev, cur_pkts, cnt, true);
     dropped = total_pkts - cnt;
-
-    /* slb-rs hook before packet sent to vm */
-    netdev_dpdk_slb_rs_in(pkts, cnt);
 
     do {
         int vhost_qid = qid * VIRTIO_QNUM + VIRTIO_RXQ;
