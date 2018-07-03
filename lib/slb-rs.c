@@ -1,4 +1,5 @@
 #include "slb-rs.h"
+#include <config.h>
 
 /* global connections per-vm tables */
 static struct dpcbs g_dpcbs;
