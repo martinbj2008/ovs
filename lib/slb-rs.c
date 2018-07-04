@@ -328,37 +328,16 @@ static void ipv4_hdr_dump(const struct ipv4_hdr *iph)
 
 void conn_expire_now(struct dpcbs_subtable* subtable, struct slb_rs_conn* conn) 
 {
-	unsigned socket_id;
-
 	if(!subtable || !conn)
 		return;
 
-	/* Put to socket_id mempool */
-	socket_id = conn->socket_id;
-
-	rte_atomic32_inc(&conn->refcnt);
-
-	/* delete the conn safely */
-	if (rte_atomic32_read(&conn->refcnt) == 2) {
-
-		/* unhash conn from table */
-		conn_unhash(subtable, conn);
-
-		if(conn->proto == IPPROTO_TCP) {
-			rte_atomic32_dec(&g_dpcbs.conn_stats.tcp_conn_total_count);
-		} else if(conn->proto == IPPROTO_UDP) {
-			rte_atomic32_dec(&g_dpcbs.conn_stats.udp_conn_total_count);
-		}
-
-		rte_atomic32_dec(&g_dpcbs.total_conn);
-		rte_atomic32_dec(&subtable->n_conn);
-		rte_atomic32_dec(&conn->refcnt);
-
-		/* Put back in the right mempool */
-		rte_mempool_put(dpcbs_conn_cache[socket_id], conn);
+	/* restart conn expire_timer when used */
+	if (rte_timer_reset(&conn->expire_timer, 
+				0, SINGLE, 
+				conn->lcore_id, conn_expire_cb, 
+				(void *)conn) < 0) {
+		rte_exit(EXIT_FAILURE, "%s: vm conn timer restart failed\n", __func__);
 	}
-
-	rte_atomic32_dec(&conn->refcnt);
 
 	return ;
 }
@@ -442,6 +421,7 @@ conn_expire_cb(__attribute__((unused)) struct rte_timer *tim, void *arg)
 
 	rte_atomic32_inc(&conn->refcnt);
 
+	/* pending status timer */
 	if(rte_timer_pending(&conn->expire_timer)) {
 		rte_atomic32_dec(&conn->refcnt);
 		return ;
@@ -599,11 +579,11 @@ void conn_flush(struct dpcbs_subtable* subtable)
 	int i;
 	struct slb_rs_conn *conn, *next;
 
-//flush_again:
+flush_again:
 	for (i = 0; i < MEM_NUM(subtable->buckets); i++) {
 		rte_spinlock_lock(&subtable->buckets[i].lock);
 		LIST_FOR_EACH_SAFE(conn, next, conn_node, &subtable->buckets[i].conn_lists) {
-			/* pending status timer */
+			/* process pending status timer */
 			if(!rte_timer_pending(&conn->expire_timer))
 				break;
 
@@ -612,10 +592,8 @@ void conn_flush(struct dpcbs_subtable* subtable)
 		rte_spinlock_unlock(&subtable->buckets[i].lock);
 	}
 
-/*
 	if(rte_atomic32_read(&subtable->n_conn) != 0)
 		goto flush_again;
-*/
 }
 
 /* hook export to ovs-dpdk in pmd_thread_main INPUT datapath : __netdev_dpdk_vhost_send */
