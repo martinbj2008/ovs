@@ -120,7 +120,8 @@ void toa_parse_from_ipopt(struct ipv4_hdr* iph, struct ipopt_toa* toa)
 }
 
 /* create vm_subtables based vm mac daddr */
-struct dpcbs_subtable* dpcbs_create_subtable(struct dpcbs* dpcbs,  struct ether_addr* eth_addr, uint32_t vni)
+struct dpcbs_subtable* 
+dpcbs_create_subtable(struct dpcbs* dpcbs, struct ether_addr* eth_addr, uint32_t vni)
 {
 	int i;
 	struct dpcbs_subtable* subtable;
@@ -219,7 +220,8 @@ void dpcbs_init(struct dpcbs* dpcbs)
 }
 
 /* Lookup subtable for vm. return subtable or NULL */
-inline struct dpcbs_subtable* dpcbs_lookup_subtable(struct dpcbs* dpcbs, struct ether_addr* eth_addr)
+struct dpcbs_subtable* 
+dpcbs_lookup_subtable(struct dpcbs* dpcbs, struct ether_addr* eth_addr)
 {
 	struct dpcbs_subtable* subtable;
 
@@ -237,7 +239,8 @@ inline struct dpcbs_subtable* dpcbs_lookup_subtable(struct dpcbs* dpcbs, struct 
 }
 
 /* find subtable for vm. return subtable or create a new subtable */
-inline struct dpcbs_subtable* dpcbs_find_subtable(struct dpcbs* dpcbs, struct ether_addr* eth_addr, uint32_t vni)
+struct dpcbs_subtable* 
+dpcbs_find_subtable(struct dpcbs* dpcbs, struct ether_addr* eth_addr, uint32_t vni)
 {
 	struct dpcbs_subtable* subtable;
 
@@ -350,7 +353,8 @@ static inline uint32_t mac_hashkey(struct ether_addr* eth_addr)
 }
 
 /* 5 tuple conn hash */
-static inline uint32_t conn_hashkey(uint32_t caddr, uint16_t cport, uint32_t daddr, uint16_t dport)
+static inline uint32_t conn_hashkey(uint32_t caddr, uint16_t cport, 
+					uint32_t daddr, uint16_t dport)
 {
 	return rte_jhash_3words(caddr, daddr, ((uint32_t)cport) << 16 | (uint32_t)dport, conn_hash_rnd) % SLB_RS_CONN_TAB_MASK;
 }
@@ -391,7 +395,8 @@ static inline int conn_unhash(struct dpcbs_subtable* subtable, struct slb_rs_con
 }
 
 /* dec conn->refcnt and update timer on locore_id */
-static inline void conn_put(__attribute__((unused)) struct dpcbs_subtable* subtable, struct slb_rs_conn *conn)
+static inline void conn_put(__attribute__((unused)) struct dpcbs_subtable* subtable, 
+				struct slb_rs_conn *conn)
 {
 	/* restart conn expire_timer when used */
 	if (rte_timer_reset(&conn->expire_timer, 
@@ -456,7 +461,11 @@ conn_expire_cb(__attribute__((unused)) struct rte_timer *tim, void *arg)
 }
 
 /* look for conn: return NULL or return refcnt incd conn*/
-struct slb_rs_conn* conn_get(struct dpcbs_subtable* subtable, uint8_t nw_proto, uint32_t daddr, uint16_t dport, uint32_t caddr, uint16_t cport, uint32_t vni)
+struct slb_rs_conn* 
+conn_get(struct dpcbs_subtable* subtable, uint8_t nw_proto, 
+		uint32_t daddr, uint16_t dport, 
+		uint32_t caddr, uint16_t cport, 
+		uint32_t vni)
 {
 	uint32_t hash;
 	struct slb_rs_conn* conn;
@@ -479,7 +488,12 @@ struct slb_rs_conn* conn_get(struct dpcbs_subtable* subtable, uint8_t nw_proto, 
 }
 
 /* create a new conn for INPUT syn packet */
-struct slb_rs_conn* conn_new(struct dpcbs_subtable* subtable, uint8_t nw_proto, uint32_t daddr, uint16_t dport, uint32_t caddr, uint16_t cport, uint32_t vni, struct ipopt_toa* ip_opt, struct ip_tnl_info* tnl_info)
+struct slb_rs_conn* 
+conn_new(struct dpcbs_subtable* subtable, uint8_t nw_proto, 
+		uint32_t daddr, uint16_t dport, 
+		uint32_t caddr, uint16_t cport, 
+		uint32_t vni, struct ipopt_toa* ip_opt, 
+		struct ip_tnl_info* tnl_info)
 {
 	unsigned socket_id;
 	struct slb_rs_conn *new = NULL;
@@ -584,10 +598,9 @@ flush_again:
 		rte_spinlock_lock(&subtable->buckets[i].lock);
 		LIST_FOR_EACH_SAFE(conn, next, conn_node, &subtable->buckets[i].conn_lists) {
 			/* process pending status timer */
-			if(!rte_timer_pending(&conn->expire_timer))
-				break;
-
-			conn_expire_now(subtable, conn);
+			if(rte_timer_pending(&conn->expire_timer))
+				conn_expire_now(subtable, conn);
+			/* config/running/stopped status should't be reset or stop */
 		}
 		rte_spinlock_unlock(&subtable->buckets[i].lock);
 	}
@@ -707,7 +720,9 @@ int __slb_rs_in(struct dp_packet *pkt)
 }
 
 /* snat src_ip->svc based on conn */
-int slb_rs_tcp_snat(struct dpcbs_subtable* subtable, struct ipv4_hdr* iph, struct tcp_hdr* tcph, struct slb_rs_conn* conn)
+int slb_rs_tcp_snat(struct dpcbs_subtable* subtable, 
+			struct ipv4_hdr* iph, struct tcp_hdr* tcph, 
+			struct slb_rs_conn* conn)
 {
 	/* get conn info & dec refcnt */
 	uint32_t nw_addr = conn->svc_info.vaddr;
@@ -822,7 +837,8 @@ drop:
 	return;
 }
 
-/* hook export to ovs-dpdk in pmd_thread_main OUTPUT datapath : netdev_dpdk_vhost_rxq_recv & netdev_dpdk_eth_send */
+/* hook export to ovs-dpdk in pmd_thread_main OUTPUT datapath
+ * netdev_dpdk_vhost_rxq_recv & netdev_dpdk_eth_send */
 void netdev_dpdk_slb_rs_out(struct dp_packet** pkts, unsigned int cnt)
 {
 	int i;
