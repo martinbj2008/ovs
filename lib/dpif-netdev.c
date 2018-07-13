@@ -4150,14 +4150,8 @@ static void pmd_port_reload(struct dp_netdev_pmd_thread *pmd){
 
     HMAP_FOR_EACH_SAFE (port, next_port, node, &pmd->dp->ports) {
         if (strcmp(port->type, "dpdk") == 0) {
-            if(!pmd->vf1_port_no){
-                pmd->vf1_port_no = port->port_no;
-                continue;
-            }else{
-                pmd->vf2_port_no = port->port_no;
-                break;
-            }
-
+            pmd->vf1_port_no = port->port_no;
+            break;
         }
     }
 }
@@ -5642,46 +5636,39 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
         break;
 
     case OVS_ACTION_ATTR_TUNNEL_PUSH:
-
         if (*depth < MAX_RECIRC_DEPTH) {
-            struct dp_packet *packet;
             dp_packet_batch_apply_cutlen(packets_);
             push_tnl_action(pmd, a, packets_);
-            static int wp = 0;
+
+#ifdef DPDK_NETDEV
+            struct dp_packet *packet = NULL;
             /* find dpdk port to send tnl pkts out */
-            odp_port_t port_no;        
+            odp_port_t port_no = pmd->vf1_port_no;
 
-        if(pmd->vf1_port_no){
-            port_no = pmd->vf1_port_no;
-            if(!wp){
-                wp = 1;
-            }else if(pmd->vf2_port_no){
-                port_no = pmd->vf2_port_no;
-                wp = 0;
-            }
-        }else{
-        return;
-        }
-
+            /* Flush packets to netdev-dpdk port */
             p = pmd_send_port_cache_lookup(pmd, port_no);
-            if (OVS_UNLIKELY(!dp_packet_batch_is_empty(&p->output_pkts)
-                        && packets_->packets[0]->source
-                        != p->output_pkts.packets[0]->source)) {
-                /* XXX: netdev-dpdk assumes that all packets in a single
-                 * output batch has the same source. Flush here to
-                 * avoid memory access issues. */
-                dp_netdev_pmd_flush_output_on_port(pmd, p);
-            }
-            if (dp_packet_batch_is_empty(&p->output_pkts)) {
-                pmd->n_output_batches++;
-            }
+            if (OVS_LIKELY(p)) {
+                if (OVS_UNLIKELY(!dp_packet_batch_is_empty(&p->output_pkts)
+                            && packets_->packets[0]->source
+                            != p->output_pkts.packets[0]->source)) {
+                    /* XXX: netdev-dpdk assumes that all packets in a single
+                     * output batch has the same source. Flush here to
+                     * avoid memory access issues. */
+                    dp_netdev_pmd_flush_output_on_port(pmd, p);
+                }
 
-            DP_PACKET_BATCH_FOR_EACH (packet, packets_) {
-                p->output_pkts_rxqs[dp_packet_batch_size(&p->output_pkts)] =
-                    pmd->ctx.last_rxq;
-                dp_packet_batch_add(&p->output_pkts, packet);
+                if (dp_packet_batch_is_empty(&p->output_pkts)) {
+                    pmd->n_output_batches++;
+                }
+
+                DP_PACKET_BATCH_FOR_EACH (packet, packets_) {
+                    p->output_pkts_rxqs[dp_packet_batch_size(&p->output_pkts)] =
+                        pmd->ctx.last_rxq;
+                    dp_packet_batch_add(&p->output_pkts, packet);
+                }
+                return;
             }
-            return;
+#endif
         }
         break;
 
