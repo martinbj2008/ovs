@@ -29,7 +29,6 @@ function sendarp(){
     i=1
     while [ $i -le $mask_dig ];do
         ip_hex=`echo "ibase=A;obase=16; $net_dig + $i"|bc`
-        echo $ip_hex
         ping -c 1 -I $_dev 0x$ip_hex >> /dev/null &
         i=`expr $i + 1`
     done
@@ -37,26 +36,34 @@ function sendarp(){
 
 function confarp() {
     _br=$1
-    pid=`ps -ax |grep ovs-vswitchd |grep -v "grep"| grep -v "monitoring"|gawk '{print $1}'`
+    pid_cnt=`pgrep ovs-vswitchd|wc -l`
 
     deault_gw=`ip route show |grep default|gawk '{print $3}'`
-    mac=`arp -n |grep $deault_gw|gawk '{print $3}'`
-    ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $deault_gw $mac
+    default_mac=`arp -n |grep $deault_gw|gawk '{print $3}'`
+    
+    j=1
+    while [ $j -le $pid_cnt ];
+    do
+        pid=`pgrep ovs-vswitchd|sed -n "${j}p"`
+        ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $deault_gw $default_mac 2>&1 >> /dev/null
 
-    arp_cnt=`arp -n |grep -v incomplete |grep bond4|wc -l`
-    i=1
-    while [ $i -le $arp_cnt ];do
-        ip=`arp -n |grep -v incomplete |grep bond4|gawk '{print $1}'|sed -n "${i}p"`
-        mac=`arp -n |grep -v incomplete |grep bond4|gawk '{print $3}'|sed -n "${i}p"`
-        echo $ip $mac
-        ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $ip $mac
-        i=`expr $i + 1`
+        arp_cnt=`arp -n |grep -v incomplete |grep bond4|wc -l`
+        i=1
+        while [ $i -le $arp_cnt ];do
+            ip=`arp -n |grep -v incomplete |grep bond4|gawk '{print $1}'|sed -n "${i}p"`
+            mac=`arp -n |grep -v incomplete |grep bond4|gawk '{print $3}'|sed -n "${i}p"`
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $ip $mac 2>&1 >> /dev/null
+            i=`expr $i + 1`
+        done
+        j=`expr $j + 1`
     done
 }
 
 br=$1
 dev=$2
 
+#main
 sendarp $dev
 sleep 1
 confarp $br $dev
+
