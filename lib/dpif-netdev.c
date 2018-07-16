@@ -590,6 +590,7 @@ struct dp_netdev_pmd_thread {
     odp_port_t vxlan_port_no;
     odp_port_t vf1_port_no;
     odp_port_t vf2_port_no;
+    odp_port_t port_curr;
 
     /* Queue id used by this pmd thread to send packets on all netdevs if
      * XPS disabled for this netdev. All static_tx_qid's are unique and less
@@ -4150,8 +4151,13 @@ static void pmd_port_reload(struct dp_netdev_pmd_thread *pmd){
 
     HMAP_FOR_EACH_SAFE (port, next_port, node, &pmd->dp->ports) {
         if (strcmp(port->type, "dpdk") == 0) {
-            pmd->vf1_port_no = port->port_no;
-            break;
+            if(pmd->vf1_port_no == 0){
+                pmd->vf1_port_no = port->port_no;
+                pmd->port_curr = port->port_no;
+            }else{
+                pmd->vf2_port_no = port->port_no;
+                break;
+            }
         }
     }
 }
@@ -5642,8 +5648,14 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
 
 #ifdef DPDK_NETDEV
             struct dp_packet *packet = NULL;
-            /* find dpdk port to send tnl pkts out */
-            odp_port_t port_no = pmd->vf1_port_no;
+            odp_port_t port_no = 0;
+
+            if(pmd->port_curr == pmd->vf1_port_no){
+                pmd->port_curr = pmd->vf2_port_no ? pmd->vf2_port_no : pmd->vf1_port_no;
+            }else if(pmd->port_curr == pmd->vf2_port_no){
+                pmd->port_curr = pmd->vf1_port_no ? pmd->vf1_port_no : pmd->vf2_port_no;
+            }
+            port_no = pmd->port_curr;
 
             /* Flush packets to netdev-dpdk port */
             p = pmd_send_port_cache_lookup(pmd, port_no);
