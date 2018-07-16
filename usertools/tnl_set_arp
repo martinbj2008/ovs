@@ -19,7 +19,7 @@ function sendarp(){
     net_hex=`iptohex $net`
     net_dig=`echo "ibase=16;obase=A;$net_hex"|bc`
 
-    mask=`ip route show dev bond4 |grep kernel | gawk '{print $1}'| gawk -F '/' '{print $2}'`
+    mask=`ip route show dev $_dev |grep kernel | gawk '{print $1}'| gawk -F '/' '{print $2}'`
     mask=`expr 32 - $mask`
 
     mask_dig=`echo 1 | gawk '{print lshift($0, lf)}' lf="$mask"`
@@ -36,7 +36,8 @@ function sendarp(){
 
 function confarp() {
     _br=$1
-    pid_cnt=`pgrep ovs-vswitchd|wc -l`
+    _dev=$2
+    pid_cnt=`ps -ax|grep ovs-vswitchd|grep -v monitoring| grep -v grep|gawk '{print $1}'|wc -l`
 
     deault_gw=`ip route show |grep default|gawk '{print $3}'`
     default_mac=`arp -n |grep $deault_gw|gawk '{print $3}'`
@@ -44,14 +45,14 @@ function confarp() {
     j=1
     while [ $j -le $pid_cnt ];
     do
-        pid=`pgrep ovs-vswitchd|sed -n "${j}p"`
+        pid=`ps -ax|grep ovs-vswitchd|grep -v monitoring| grep -v grep|gawk '{print $1}'|sed -n "${j}p"`
         ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $deault_gw $default_mac 2>&1 >> /dev/null
 
-        arp_cnt=`arp -n |grep -v incomplete |grep bond4|wc -l`
+        arp_cnt=`arp -n |grep -v incomplete |grep $_dev|wc -l`
         i=1
         while [ $i -le $arp_cnt ];do
-            ip=`arp -n |grep -v incomplete |grep bond4|gawk '{print $1}'|sed -n "${i}p"`
-            mac=`arp -n |grep -v incomplete |grep bond4|gawk '{print $3}'|sed -n "${i}p"`
+            ip=`arp -n |grep -v incomplete |grep $_dev|gawk '{print $1}'|sed -n "${i}p"`
+            mac=`arp -n |grep -v incomplete |grep $_dev|gawk '{print $3}'|sed -n "${i}p"`
             ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $ip $mac 2>&1 >> /dev/null
             i=`expr $i + 1`
         done
@@ -66,4 +67,3 @@ dev=$2
 sendarp $dev
 sleep 1
 confarp $br $dev
-
