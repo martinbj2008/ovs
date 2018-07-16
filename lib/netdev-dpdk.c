@@ -2151,6 +2151,15 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
     char *chr = NULL;
     int ret = 0;
 
+    if(strcmp(proto, "tcp") == 0){
+        protocol = IPPROTO_TCP;
+    }else if(strcmp(proto, "icmp") == 0){
+        protocol = IPPROTO_ICMP;
+    }else{
+        unixctl_command_reply(conn, "Invaild proto\n");
+        return; 
+    }
+    
     memset(&in, 0, sizeof(struct in_addr));
 
     chr = strchr(ipmask, '/');
@@ -2180,23 +2189,14 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
         sscanf(maxp, "%u", &max_port);
     }
 
-    if(min_port > max_port || min_port > 65535 || 
-        min_port < 1 || max_port > 65535 || max_port < 1){ 
+    if(protocol == IPPROTO_TCP && (min_port > max_port || min_port > 65535 || 
+        min_port < 1 || max_port > 65535 || max_port < 1)){ 
         unixctl_command_reply(conn, "Invaild Port\n");
         return; 
     }
 
     min_port = htons(min_port);
     max_port = htons(max_port);
-
-    if(strcmp(proto, "tcp") == 0){
-        protocol = IPPROTO_TCP;
-    }else if(strcmp(proto, "icmp") == 0){
-        protocol = IPPROTO_ICMP;
-    }else{
-        unixctl_command_reply(conn, "Invaild proto\n");
-        return; 
-    }
 
     ovs_mutex_lock(&dpdk_mutex);
 
