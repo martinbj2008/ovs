@@ -941,6 +941,8 @@ bridge_add_ports__(struct bridge *br, const struct shash *wanted_ports,
         for (i = 0; i < port_cfg->n_interfaces; i++) {
             const struct ovsrec_interface *iface_cfg = port_cfg->interfaces[i];
             ofp_port_t requested_ofp_port;
+            if(strcmp(br->name, port_cfg->name) == 0)
+                continue;
 
             requested_ofp_port = iface_get_requested_ofp_port(iface_cfg);
             if ((requested_ofp_port != OFPP_NONE) == with_requested_port) {
