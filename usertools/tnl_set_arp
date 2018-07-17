@@ -62,8 +62,19 @@ function confarp() {
 
 br=$1
 dev=$2
+interval=$3
+
+if [ $interval -lt 30 ] || [ -z $br ] || [ -z $dev ];then
+    echo "USAGE:"
+    echo "CMD symbol $0 br-name interface interval(>= 30)"
+    exit
+fi
 
 #main
-sendarp $dev
-sleep 1
-confarp $br $dev
+while [ 1 ];
+do
+    sendarp $dev
+    sleep 1
+    confarp $br $dev
+    sleep $interval
+done
