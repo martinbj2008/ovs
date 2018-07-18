@@ -5648,7 +5648,15 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
 
 #ifdef DPDK_NETDEV
             struct dp_packet *packet = NULL;
+            struct dp_packet_batch out;
+
             odp_port_t port_no = 0;
+
+            if(OVS_UNLIKELY(pmd->vf1_port_no == 0)){
+                pmd_port_reload(pmd);
+                if(OVS_UNLIKELY(pmd->vf1_port_no == 0))
+                    return;
+            }
 
             if(pmd->port_curr == pmd->vf1_port_no){
                 pmd->port_curr = pmd->vf2_port_no ? pmd->vf2_port_no : pmd->vf1_port_no;
@@ -5656,6 +5664,13 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
                 pmd->port_curr = pmd->vf1_port_no ? pmd->vf1_port_no : pmd->vf2_port_no;
             }
             port_no = pmd->port_curr;
+
+            if (!may_steal) {
+                dp_packet_batch_clone(&out, packets_);
+                dp_packet_batch_reset_cutlen(packets_);
+                packets_ = &out;
+            }
+            dp_packet_batch_apply_cutlen(packets_);
 
             /* Flush packets to netdev-dpdk port */
             p = pmd_send_port_cache_lookup(pmd, port_no);
@@ -5666,6 +5681,12 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
                     /* XXX: netdev-dpdk assumes that all packets in a single
                      * output batch has the same source. Flush here to
                      * avoid memory access issues. */
+                    dp_netdev_pmd_flush_output_on_port(pmd, p);
+                }
+
+                if (dp_packet_batch_size(&p->output_pkts)
+                    + dp_packet_batch_size(packets_) > NETDEV_MAX_BURST) {
+                    /* Flush here to avoid overflow. */
                     dp_netdev_pmd_flush_output_on_port(pmd, p);
                 }
 
