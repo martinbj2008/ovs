@@ -33,6 +33,21 @@ static struct tcp_states_t tcp_states[] = {
 	/*rst*/ {{sCL, sCL, sCL, sSR, sCL, sCL, sCL, sCL, sLA, sLI, sCL}},
 };
 
+static const char * udp_state_name(uint8_t state)
+{
+	if (state >= TOA_UDP_S_LAST)
+		return "ERR!";
+	return udp_state_name_table[state] ? udp_state_name_table[state] : "?";
+}
+
+static const char * tcp_state_name(uint8_t state)
+{
+    	if (state >= TOA_TCP_S_LAST)
+    		return "ERR!";
+
+    	return tcp_state_name_table[state] ? tcp_state_name_table[state] : "?";
+}
+
 int tcp_state_idx(const struct tcp_hdr *th)
 {
 	if (th->tcp_flags & TCP_RST_FLAG)
@@ -77,7 +92,7 @@ void toa_parse_from_ipopt(struct ipv4_hdr* iph, struct ipopt_toa* toa)
 	ptr = (unsigned char *)(iph + 1);
 	len = (IPV4_HDR_IHL_MASK & iph->version_ihl) * sizeof(uint32_t) - sizeof(struct ipv4_hdr);
 
-	if( len == 0 )
+	if (len == 0)
 		return ;
 
 	while (len > 0) {
@@ -85,9 +100,9 @@ void toa_parse_from_ipopt(struct ipv4_hdr* iph, struct ipopt_toa* toa)
 		int opsize;
 
 		switch (opcode) {
-			case TCPOPT_EOL:
+			case IPOPT_EOL:
 				return;
-			case TCPOPT_NOP:
+			case IPOPT_NOP:
 				len--;
 				continue;
 			default:
@@ -96,18 +111,16 @@ void toa_parse_from_ipopt(struct ipv4_hdr* iph, struct ipopt_toa* toa)
 					return;
 				if (opsize > len)
 					return;	/* partial options */
-				if (( IPOPT_TOA == opcode && IPOLEN_TOA == opsize) 
-						|| (IPOPT_CHECK == opcode && IPOLEN_CHECK == opsize)) {
+				if ((IPOPT_TOA == opcode && IPOLEN_TOA == opsize) 
+					|| (IPOPT_CHECK == opcode && IPOLEN_CHECK == opsize)) {
 					toa->opcode = opcode;
 					toa->opsize = opsize;
 					memcpy(&toa->port, ptr, sizeof(uint16_t));
 					memcpy(&toa->addr, ptr + 2, sizeof(uint32_t));
-#ifdef CONFIG_SLB_RS_DEBUG
-					RTE_LOG(DEBUG, SLB_RS, "[%s] lcore=%u parsed ip option.\n", __func__, rte_lcore_id());
-#endif 
+
 					/* 
 					 * need to erase the opsize bytes ip option and update checksum
-					 * memset(ptr-2, TCPOPT_NOP, opsize);
+					 * memset(ptr-2, IPOPT_NOP, opsize);
 					 * */
 					return;
 				}
@@ -181,7 +194,7 @@ void dpcbs_destroy_subtable(struct dpcbs* dpcbs, struct dpcbs_subtable* subtable
 
 	rte_atomic16_dec(&dpcbs->n_tab);
 
-	if(subtable && rte_atomic32_read(&subtable->n_conn) == 0) {
+	if (subtable && rte_atomic32_read(&subtable->n_conn) == 0) {
 		rte_free(subtable);
 		subtable = NULL;
 	}
@@ -244,20 +257,11 @@ dpcbs_find_subtable(struct dpcbs* dpcbs, struct ether_addr* eth_addr, uint32_t v
 {
 	struct dpcbs_subtable* subtable;
 
-#ifdef CONFIG_SLB_RS_DEBUG
-	char daddr[18];
-	ether_format_addr(daddr, sizeof(daddr), eth_addr);
-	RTE_LOG(DEBUG, SLB_RS, "[%s] lcore=%u daddr=%s entering.\n", __func__, rte_lcore_id(), daddr);
-#endif 
-
 	rte_rwlock_read_lock(&dpcbs->rwlock);
 	HMAP_FOR_EACH_WITH_HASH (subtable, hmap_node, mac_hashkey(eth_addr), &dpcbs->vm_subtables) {
 		if (eth_addr_equal(&subtable->vm_mac_addr, eth_addr)) {
 			rte_rwlock_read_unlock(&dpcbs->rwlock);
 
-#ifdef CONFIG_SLB_RS_DEBUG
-			RTE_LOG(DEBUG, SLB_RS, "[%s] lcore=%u daddr=%s find subtable.\n", __func__, rte_lcore_id(), daddr);
-#endif 
 			return subtable;
 		}
 	}
@@ -294,49 +298,28 @@ static inline void conn_dump(struct ds* reply, struct slb_rs_conn *conn)
 
 	if (conn->conn_type == IPOPT_TOA) {
 		vaddr = inet_ntop(AF_INET, &conn->svc_info.vaddr, vbuf, sizeof(vbuf)) ? vbuf : "::";
-		ds_put_format(reply, "slb_rs_dataplane_conn : lcore=%d proto=%u caddr=%s: cport=%u daddr=%s dport=%u svc_addr=%s svc_port=%u conn refs %d.\n",
-			conn->lcore_id, conn->proto,
+		ds_put_format(reply, "[slb_rs_dp_conn] : lcore=%d proto=%u state=%s caddr=%s cport=%u daddr=%s dport=%u svc_addr=%s svc_port=%u conn refs %d.\n",
+			conn->lcore_id, conn->proto, tcp_state_name(conn->state),
 			caddr, ntohs(conn->cport), daddr, ntohs(conn->dport), 
 			vaddr, ntohs(conn->svc_info.vport), rte_atomic32_read(&conn->refcnt));
 	} else if (conn->conn_type == IPOPT_CHECK) {
 		kpd_saddr = inet_ntop(AF_INET, &conn->tunnel_info.saddr, kpd_sbuf, sizeof(kpd_sbuf)) ? kpd_sbuf : "::";
 		kpd_daddr = inet_ntop(AF_INET, &conn->tunnel_info.daddr, kpd_dbuf, sizeof(kpd_dbuf)) ? kpd_dbuf : "::";
-		ds_put_format(reply, "slb_rs_kpd_conn : lcore=%d proto=%u caddr=%s cport=%u daddr=%s dport=%u kpd_vtep_saddr=%s kpd_vtep_daddr=%s conn refs %d.\n",
-			conn->lcore_id, conn->proto,
+		ds_put_format(reply, "[slb_rs_kpd_conn] : lcore=%d proto=%u state=%s caddr=%s cport=%u daddr=%s dport=%u kpd_vtep_saddr=%s kpd_vtep_daddr=%s conn refs %d.\n",
+			conn->lcore_id, conn->proto, tcp_state_name(conn->state),
 			caddr, ntohs(conn->cport), daddr, ntohs(conn->dport),
 			kpd_daddr, kpd_saddr, rte_atomic32_read(&conn->refcnt));
 	}
 }
 
-#ifdef CONFIG_SLB_RS_DEBUG
-static void ipv4_hdr_dump(const struct ipv4_hdr *iph)
-{
-	char saddr[16], daddr[16];
-
-	if (!inet_ntop(AF_INET, &iph->src_addr, saddr, sizeof(saddr)))
-		return;
-	if (!inet_ntop(AF_INET, &iph->dst_addr, daddr, sizeof(daddr)))
-		return;
-
-	fprintf(stdout, "%s lcore %u ipv4 hl %u tos %u tot %u "
-			"id %u ttl %u prot %u src %s dst %s\n",
-			__func__, rte_lcore_id(), IPV4_HDR_IHL_MASK & iph->version_ihl,
-			iph->type_of_service, ntohs(iph->total_length),
-			ntohs(iph->packet_id), iph->time_to_live,
-			iph->next_proto_id, saddr, daddr);
-
-	return;
-}
-#endif
-
 void conn_expire_now(struct dpcbs_subtable* subtable, struct slb_rs_conn* conn) 
 {
-	if(!subtable || !conn)
+	if (!subtable || !conn)
 		return;
 
 	/* restart conn expire_timer when used */
 	if (rte_timer_reset(&conn->expire_timer, 
-				0, SINGLE, 
+				10, SINGLE, 
 				conn->lcore_id, conn_expire_cb, 
 				(void *)conn) < 0) {
 		rte_exit(EXIT_FAILURE, "%s: vm conn timer restart failed\n", __func__);
@@ -418,7 +401,7 @@ conn_expire_cb(__attribute__((unused)) struct rte_timer *tim, void *arg)
 	struct slb_rs_conn* conn = (struct slb_rs_conn* )arg;
 	struct dpcbs_subtable* subtable = conn->subtable;
 
-	if(!subtable || !conn)
+	if (!subtable || !conn)
 		return;
 
 	/* Put to socket_id mempool */
@@ -427,7 +410,7 @@ conn_expire_cb(__attribute__((unused)) struct rte_timer *tim, void *arg)
 	rte_atomic32_inc(&conn->refcnt);
 
 	/* pending status timer */
-	if(rte_timer_pending(&conn->expire_timer)) {
+	if (rte_timer_pending(&conn->expire_timer)) {
 		rte_atomic32_dec(&conn->refcnt);
 		return ;
 	}
@@ -438,9 +421,9 @@ conn_expire_cb(__attribute__((unused)) struct rte_timer *tim, void *arg)
 		conn_unhash(subtable, conn);
 
 		/* update statics */
-		if(conn->proto == IPPROTO_TCP) {
+		if (conn->proto == IPPROTO_TCP) {
 			rte_atomic32_dec(&g_dpcbs.conn_stats.tcp_conn_total_count);
-		} else if(conn->proto == IPPROTO_UDP) {
+		} else if (conn->proto == IPPROTO_UDP) {
 			rte_atomic32_dec(&g_dpcbs.conn_stats.udp_conn_total_count);
 		}
 
@@ -451,6 +434,17 @@ conn_expire_cb(__attribute__((unused)) struct rte_timer *tim, void *arg)
 		/* Put back in the mempool */
 		rte_mempool_put(dpcbs_conn_cache[socket_id], conn);
 
+		/* destroy subtable when unused */
+		if (subtable && rte_atomic32_read(&subtable->n_conn) == 0) {
+			rte_rwlock_write_lock(&g_dpcbs.rwlock);
+			hmap_remove(&g_dpcbs.vm_subtables, &subtable->hmap_node);
+			rte_rwlock_write_unlock(&g_dpcbs.rwlock);
+
+			rte_atomic16_dec(&g_dpcbs.n_tab);
+			rte_free(subtable);
+
+			subtable = NULL;
+		}
 		return ;
 	}
 
@@ -474,7 +468,7 @@ conn_get(struct dpcbs_subtable* subtable, uint8_t nw_proto,
 
 	rte_spinlock_lock(&(subtable->buckets[hash].lock));
 	LIST_FOR_EACH(conn, conn_node, &(subtable->buckets[hash].conn_lists)) {
-		if( caddr == conn->caddr && daddr == conn->daddr && cport == conn->cport
+		if (caddr == conn->caddr && daddr == conn->daddr && cport == conn->cport
 				&& dport == conn->dport && nw_proto == conn->proto && vni == conn->vni) {
 			/* return with lock & inc refcnt */
 			rte_atomic32_inc(&conn->refcnt);
@@ -506,7 +500,7 @@ conn_new(struct dpcbs_subtable* subtable, uint8_t nw_proto,
 
 	/* Get conn from local socket mempool */
 	socket_id = rte_lcore_to_socket_id(lcore_id);
-	if(SOCKET_ID_ANY == socket_id)
+	if (SOCKET_ID_ANY == socket_id)
 		socket_id = 0;
 
 	if (rte_atomic32_read(&g_dpcbs.total_conn) >= rte_atomic32_read(&g_dpcbs.total_conn_limit)) {
@@ -528,10 +522,10 @@ conn_new(struct dpcbs_subtable* subtable, uint8_t nw_proto,
 
 	ovs_list_init(&new->conn_node);
 
-	if(nw_proto == IPPROTO_TCP) {
+	if (nw_proto == IPPROTO_TCP) {
 		new->state = TOA_TCP_S_SYN_RECV;
 		new->timeout = tcp_timeouts[new->state] * rte_get_timer_hz();
-	} else if(nw_proto == IPPROTO_UDP) {
+	} else if (nw_proto == IPPROTO_UDP) {
 		new->state = TOA_UDP_S_NORMAL;
 		new->timeout = udp_timeouts[new->state] * rte_get_timer_hz();
 	}
@@ -548,12 +542,12 @@ conn_new(struct dpcbs_subtable* subtable, uint8_t nw_proto,
 
 	new->conn_type = ip_opt->opcode;
 
-	if(IPOPT_TOA == ip_opt->opcode) {
+	if (IPOPT_TOA == ip_opt->opcode) {
 		/* dataplane ip option */
 		new->svc_info.vaddr = ip_opt->addr;
 		new->svc_info.vport = ip_opt->port;
 	}
-	else if(IPOPT_CHECK == ip_opt->opcode) {
+	else if (IPOPT_CHECK == ip_opt->opcode) {
 		/* healthy check ip option */
 		new->tunnel_info.daddr = tnl_info->daddr;
 		new->tunnel_info.saddr = tnl_info->saddr;
@@ -575,9 +569,9 @@ conn_new(struct dpcbs_subtable* subtable, uint8_t nw_proto,
 		rte_exit(EXIT_FAILURE, "%s: vm conn timer start failed\n", __func__);
 	}
 
-	if(nw_proto == IPPROTO_TCP) {
+	if (nw_proto == IPPROTO_TCP) {
 		rte_atomic32_inc(&g_dpcbs.conn_stats.tcp_conn_total_count);
-	} else if(nw_proto == IPPROTO_UDP) {
+	} else if (nw_proto == IPPROTO_UDP) {
 		rte_atomic32_inc(&g_dpcbs.conn_stats.udp_conn_total_count);
 	}
 	rte_atomic32_inc(&subtable->n_conn);
@@ -593,7 +587,6 @@ void conn_flush(struct dpcbs_subtable* subtable)
 	int i;
 	struct slb_rs_conn *conn, *next;
 
-flush_again:
 	for (i = 0; i < MEM_NUM(subtable->buckets); i++) {
 		rte_spinlock_lock(&subtable->buckets[i].lock);
 		LIST_FOR_EACH_SAFE(conn, next, conn_node, &subtable->buckets[i].conn_lists) {
@@ -605,8 +598,6 @@ flush_again:
 		rte_spinlock_unlock(&subtable->buckets[i].lock);
 	}
 
-	if(rte_atomic32_read(&subtable->n_conn) != 0)
-		goto flush_again;
 }
 
 /* hook export to ovs-dpdk in pmd_thread_main INPUT datapath : __netdev_dpdk_vhost_send */
@@ -614,11 +605,14 @@ void netdev_dpdk_slb_rs_in(struct dp_packet **pkts, unsigned int cnt)
 {
 	int i;
 
-	if(OVS_UNLIKELY(cnt <= 0))
+	if (OVS_UNLIKELY(slb_disable))
+		return;
+
+	if (OVS_UNLIKELY(cnt <= 0))
 		return ;
 
 	/* ovs-dpdk process a batch of packets */
-	for( i = 0; i < cnt; i++) {
+	for (i = 0; i < cnt; i++) {
 		if(OVS_LIKELY(pkts[i]))
 			__slb_rs_in(pkts[i]);
 	}
@@ -629,7 +623,7 @@ void netdev_dpdk_slb_rs_in(struct dp_packet **pkts, unsigned int cnt)
 int __slb_rs_in(struct dp_packet *pkt)
 {
 	struct rte_mbuf* mbuf = &pkt->mbuf;
-	if(!mbuf)
+	if (!mbuf)
 		return INVPKT;
 
 	struct ether_hdr* ethdr;
@@ -642,7 +636,7 @@ int __slb_rs_in(struct dp_packet *pkt)
 	uint32_t vni = (uint32_t)ntohll(pkt->md.tunnel.tun_id);
 
 	ethdr = rte_pktmbuf_mtod(mbuf, struct ether_hdr*);
-	if(ethdr->ether_type != rte_cpu_to_be_16(ETHER_TYPE_IPv4)) 
+	if (ethdr->ether_type != rte_cpu_to_be_16(ETHER_TYPE_IPv4)) 
 		return IGNORE;
 
 	iph = rte_pktmbuf_mtod_offset(mbuf, struct ipv4_hdr*, sizeof(struct ether_hdr));
@@ -650,10 +644,6 @@ int __slb_rs_in(struct dp_packet *pkt)
 		return IGNORE;
 
 	tcph = rte_pktmbuf_mtod_offset(mbuf, struct tcp_hdr*, sizeof(struct ether_hdr) + (IPV4_HDR_IHL_MASK & iph->version_ihl) * sizeof(uint32_t));
-
-#ifdef CONFIG_SLB_RS_DEBUG
-	ipv4_hdr_dump(iph);
-#endif 
 
 	if ((tcph->tcp_flags & TCP_SYN_FLAG) && !(tcph->tcp_flags & TCP_ACK_FLAG)) {
 
@@ -671,13 +661,13 @@ int __slb_rs_in(struct dp_packet *pkt)
 
 		/* find or create a new subtable for mac addr hashkey */
 		subtable = dpcbs_find_subtable(&g_dpcbs, &ethdr->d_addr, vni);
-		if(!subtable)
+		if (!subtable)
 			return IGNORE;
 
 		conn = conn_get(subtable, iph->next_proto_id, iph->dst_addr, tcph->dst_port, iph->src_addr, tcph->src_port, vni);
-		if(NULL == conn) {
+		if (NULL == conn) {
 			conn = conn_new(subtable, iph->next_proto_id, iph->dst_addr, tcph->dst_port, iph->src_addr, tcph->src_port, vni, &toa, &tnl_info);
-			if(NULL == conn) {
+			if (NULL == conn) {
 				RTE_LOG(WARNING, SLB_RS, "%s: create new conn failed\n", __func__);
 				rte_atomic32_inc(&g_dpcbs.conn_stats.conn_create_failed);
 				return NOMEM;
@@ -706,11 +696,11 @@ int __slb_rs_in(struct dp_packet *pkt)
 
 		/* find or create a new subtable for hashkey */
 		subtable = dpcbs_lookup_subtable(&g_dpcbs, &ethdr->d_addr);
-		if(!subtable)
+		if (!subtable)
 			return IGNORE;
 
 		conn = conn_get(subtable, iph->next_proto_id, iph->dst_addr, tcph->dst_port, iph->src_addr, tcph->src_port, vni);
-		if(conn) {
+		if (conn) {
 			tcp_state_trans(conn, tcph, TOA_DIR_INPUT);
 			conn_put(subtable, conn);
 		}
@@ -843,12 +833,15 @@ void netdev_dpdk_slb_rs_out(struct dp_packet** pkts, unsigned int cnt)
 {
 	int i;
 
-	if(OVS_UNLIKELY(cnt <= 0))
+	if (OVS_UNLIKELY(slb_disable))
+		return;
+
+	if (OVS_UNLIKELY(cnt <= 0))
 		return ;
 
 	/* ovs-dpdk process a batch of packets */
-	for( i = 0; i < cnt; i++) {
-		if(OVS_LIKELY(pkts[i]))
+	for (i = 0; i < cnt; i++) {
+		if (OVS_LIKELY(pkts[i]))
 			__slb_rs_out(pkts[i]);
 	}
 
@@ -858,7 +851,7 @@ void netdev_dpdk_slb_rs_out(struct dp_packet** pkts, unsigned int cnt)
 int __slb_rs_out(struct dp_packet* pkt)
 {
 	struct rte_mbuf* mbuf = &pkt->mbuf;
-	if(!mbuf)
+	if (!mbuf)
 		return INVPKT;
 
 	struct ether_hdr* ethdr;
@@ -870,12 +863,12 @@ int __slb_rs_out(struct dp_packet* pkt)
 	uint32_t vni = 0;
 
 	ethdr = rte_pktmbuf_mtod(mbuf, struct ether_hdr*);
-	if(ethdr->ether_type != rte_cpu_to_be_16(ETHER_TYPE_IPv4)) 
+	if (ethdr->ether_type != rte_cpu_to_be_16(ETHER_TYPE_IPv4)) 
 		return IGNORE;
 
 	/* find subtable for hashkey firstly , return if NULL which means not slb traffic */
 	subtable = dpcbs_lookup_subtable(&g_dpcbs, &ethdr->s_addr);
-	if(!subtable)
+	if (!subtable)
 		return IGNORE;
 
 	vni = subtable->vni;
@@ -886,12 +879,8 @@ int __slb_rs_out(struct dp_packet* pkt)
 
 	tcph = rte_pktmbuf_mtod_offset(mbuf, struct tcp_hdr*, sizeof(struct ether_hdr) + (IPV4_HDR_IHL_MASK & iph->version_ihl) * sizeof(uint32_t));
 
-#ifdef CONFIG_SLB_RS_DEBUG
-	ipv4_hdr_dump(iph);
-#endif 
-
 	conn = conn_get(subtable, iph->next_proto_id, iph->src_addr, tcph->src_port, iph->dst_addr, tcph->dst_port, vni);
-	if(NULL == conn) 
+	if (NULL == conn) 
 		/* unlock safe already, no inc refcnt */
 		return IGNORE;
 	else {
@@ -901,12 +890,22 @@ int __slb_rs_out(struct dp_packet* pkt)
 			/* SLB dataplane */
 			slb_rs_tcp_snat(subtable, iph, tcph, conn);
 		} else if (conn->conn_type == IPOPT_CHECK) {
+			tcp_state_trans(conn, tcph, TOA_DIR_OUTPUT);
 			/* SLB chk */
 			slb_rs_chk_xmit(mbuf, conn);
 		}
 	}
 
 	return OK;
+}
+
+static void
+slb_rs_enable(struct unixctl_conn *conn, int argc OVS_UNUSED,
+                     const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
+{
+	atomic_store_relaxed(&slb_disable, false);
+	/* to release resource */
+    	unixctl_command_reply(conn, "OK");
 }
 
 static void
@@ -924,8 +923,8 @@ slb_rs_statics(struct unixctl_conn *conn, int argc OVS_UNUSED,
 {
 	struct ds reply = DS_EMPTY_INITIALIZER;
 
+    	ds_put_format(&reply, "total_n_rs : %u\n", rte_atomic16_read(&g_dpcbs.n_tab));
     	ds_put_format(&reply, "total_n_conns : %u\n", rte_atomic32_read(&g_dpcbs.total_conn));
-    	ds_put_format(&reply, "total_n_slb_rs : %u\n", rte_atomic16_read(&g_dpcbs.n_tab));
     	ds_put_format(&reply, "tcp_conn_count : %u\n", rte_atomic32_read(&g_dpcbs.conn_stats.tcp_conn_total_count));
     	ds_put_format(&reply, "udp_conn_count : %u\n", rte_atomic32_read(&g_dpcbs.conn_stats.udp_conn_total_count));
     	ds_put_format(&reply, "conn_create_failed : %u\n", rte_atomic32_read(&g_dpcbs.conn_stats.conn_create_failed));
@@ -1046,6 +1045,7 @@ int slb_rs_init(void)
 	conn_hash_rnd = (uint32_t)random();
 	dmac_hash_rnd = (uint32_t)random();
 
+	unixctl_command_register("slb-rs/enable", "", 0, 0, slb_rs_enable, NULL);
 	unixctl_command_register("slb-rs/disable", "", 0, 0, slb_rs_disable, NULL);
 	unixctl_command_register("slb-rs/statics", "", 0, 0, slb_rs_statics, NULL);
 	unixctl_command_register("slb-rs/conn-dump", "", 0, 0, slb_rs_conn_dump, NULL);

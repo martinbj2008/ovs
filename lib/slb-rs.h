@@ -10,12 +10,12 @@
 #include "unixctl.h"
 #include "ovs-atomic.h"
 
-#define SLB_RS_CONN_NUM_MAX     2000000  
-#define PER_VM_CONN_MAX		100000 
-#define MAX_CONN_TAB_SIZE       100
+#define SLB_RS_CONN_NUM_MAX     200000
+#define PER_VM_CONN_MAX		10000 
+#define MAX_CONN_TAB_SIZE       50
 #define MAX_CONN_TAB_MASK       (MAX_CONN_TAB_SIZE - 1)
 
-#define SLB_RS_CONN_TAB_BITS    2     
+#define SLB_RS_CONN_TAB_BITS    5    
 #define SLB_RS_CONN_TAB_SIZE    (1 << SLB_RS_CONN_TAB_BITS)
 #define SLB_RS_CONN_TAB_MASK    (SLB_RS_CONN_TAB_SIZE - 1)
 #define SLB_RS_LOCK_TAB_SIZE    SLB_RS_CONN_TAB_SIZE
@@ -34,10 +34,6 @@
 #define PORT_MIN		49152
 #define PORT_MAX		65535
 #define PORT_RANGE 		((PORT_MAX - PORT_MIN) + 1)
-
-/*
-#define CONFIG_SLB_RS_DEBUG     1
-*/
 
 struct conn_stats {
     rte_atomic32_t	conn_create_failed;
@@ -151,7 +147,7 @@ struct unixctl_conn;
 
 static atomic_bool slb_disable = ATOMIC_VAR_INIT(false);
 
-#define CONN_POOL_SIZE          8192
+#define CONN_POOL_SIZE          65536
 #define CONN_CACHE_SIZE         128
 
 /* private ip option according to RFC */
@@ -294,11 +290,6 @@ void conn_expire_cb(__attribute__((unused)) struct rte_timer *,
 
 void conn_flush(struct dpcbs_subtable* );
 
-#ifdef CONFIG_SLB_RS_DEBUG
-static inline void conn_dump(const char *, struct slb_rs_conn *);
-static void ipv4_hdr_dump(const struct ipv4_hdr * );
-#endif 
-
 /* module init exit operations export to ovs-dpdk */
 int slb_rs_init(void);
 int slb_rs_exit(void);
@@ -312,6 +303,9 @@ int __slb_rs_out(struct dp_packet * );
 void slb_rs_chk_xmit(struct rte_mbuf *, struct slb_rs_conn* );
 
 /* ovs-appctl static */
+static void
+slb_rs_enable(struct unixctl_conn *conn, int argc OVS_UNUSED,
+                     const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED);
 static void
 slb_rs_disable(struct unixctl_conn *conn, int argc OVS_UNUSED,
                      const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED);

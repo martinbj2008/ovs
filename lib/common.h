@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <inttypes.h>
+#include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <sys/types.h>
 #include <linux/if_ether.h>
