@@ -11,9 +11,9 @@ EXTRA_DIST += \
 		usertools/ovs-dpdk.conf  \
 		usertools/ovs-hotupgrade  \
 		usertools/README.rst  \
-		usertools/step1_pre_check.sh  \
-		usertools/step2_ovs_start.sh  \
-		usertools/step3_post_check.sh  \
-		usertools/step4_ovs_stop.sh  \
-		usertools/step5_ovs_restart.sh  \
+		usertools/ovs_pre_check  \
+		usertools/ovs_start  \
+		usertools/ovs_post_check  \
+		usertools/ovs_stop  \
+		usertools/ovs_restart  \
 		usertools/tnl_set_arp
