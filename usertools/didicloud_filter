@@ -65,7 +65,7 @@ function ethtool_cmd()
 		[ $? -ne 0 ] && log_info "ethtool add the flow error:[$r]" && echo $ERR_ETHTOOL_ERR1 && return 1
 
 	elif [ "$ops" == "del" ]; then
-		rule_ids=`ethtool -n enp132s0f1 | grep "Filter:" | awk '{print $2}'`
+		rule_ids=`ethtool -n $pf | grep "Filter:" | awk '{print $2}'`
 		[ "$rule_ids" == "" ] && log_info "Not list any rule via ethtool[no rule in the kernel.]" && echo $ERR_ETHTOOL_ERR2 && return 1
 
 		for id in $rule_ids
@@ -98,6 +98,8 @@ function pci_device_flow()
 	local ops=$1
 	local portpci=$2
 	local request_vni=$3
+
+	declare -u request_mac
 	local request_mac=$4
 
 	driver_com=$(ls $net_driver 2>&1)
@@ -115,7 +117,7 @@ function pci_device_flow()
 
 		# parse the virtfnX
 		virtfnX=$(ls $net_driver/$pf_pci | grep "virtfn[0-9]")
-		[ "$virtfnX" == "" ] && log_info "can not get vf of pf $pf_pci: [$pf_com]" && echo $ERR_PCI_ERR4 && return 1
+		# [ "$virtfnX" == "" ] && log_info "can not get vf of pf $pf_pci: [$pf_com]" && echo $ERR_PCI_ERR4 && return 1
 
 		for virtfn in $virtfnX
 		do
@@ -131,8 +133,8 @@ function pci_device_flow()
 					pf=$(pf_device_name $pf_pci)
 					vf=$(vf_id $virtfn)
 
-					ethtool_cmd $ops $pf $vf $request_vni $request_mac
-					[ $? -ne 0 ] && echo $ERR_PCI_ERR7 && return 1 
+					err=`ethtool_cmd $ops $pf $vf $request_vni $request_mac`
+					[ $? -ne 0 ] && echo $ERR_PCI_ERR7 && return 1
 
 					return 0
 				fi
