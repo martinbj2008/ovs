@@ -64,10 +64,23 @@ br=$1
 dev=$2
 interval=$3
 
-if [ $interval -lt 30 ] || [ -z $br ] || [ -z $dev ];then
+
+
+if [ -z $br ] || [ -z $dev ];then
     echo "USAGE:"
     echo "CMD symbol $0 br-name interface interval(>= 30)"
     exit
+else
+    if [ -z "$interval" ];then
+        sendarp $dev
+        sleep 1
+        confarp $br $dev
+        exit
+    elif [ $interval -lt 30 ];then
+        echo "USAGE:"
+        echo "CMD symbol $0 br-name interface interval(>= 30)"
+        exit
+    fi
 fi
 
 #main
