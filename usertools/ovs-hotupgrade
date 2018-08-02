@@ -11,6 +11,7 @@ ovs_conf="/etc/openvswitch/ovs-dpdk.conf"
 host_ip=""
 ipam_conf=""
 interface=""
+interval=0
 
 date=`date +"%Y-%m-%d--%H:%m:%S"`
 log_file="/usr/local/var/log/openvswitch/ovs-hotupgrade-${date}.log"
@@ -220,6 +221,18 @@ function sys_env_check(){
         return 1
     fi
     
+    bind_vf=`dpdk-devbind -s | grep "XL710/X710 Virtual Function" |grep drv=vfio-pci | grep "${curr_vf1}" |gawk '{print $1}'`
+    if [ -z "$bind_vf" ];then
+        log_echo "Vf pci $bind_vf should bind by vfio"
+        return 1
+    fi
+    
+    unbind_vf=`dpdk-devbind -s |grep "XL710/X710 Virtual Function" | grep drv=vfio-pci |grep "${next_vf1}"|gawk '{print $1}'`
+    if [ -n "$unbind_vf" ];then
+        log_echo "Vf pci $unbind_vf cannot bind by vfio"
+        return 1
+    fi
+    
     log "curr status curr_prefix $curr_prefix curr_log $curr_log curr_ovs_pid $curr_ovs_pid curr_vf1 $curr_vf1 curr_dpid $curr_dpid curr_mode $curr_mode"
     log "next status next_prefix $next_prefix next_log $next_log next_ovs_pid $next_ovs_pid next_vf1 $next_vf1 next_dpid $next_dpid next_mode $next_mode"
     
@@ -275,6 +288,9 @@ function prepare_upgrade(){
 
     ipam_lock
     [ $? -ne 0 ] && return 1
+    
+    ovs-vsctl --no-wait set Open_vSwitch . other_config:cpu-yield=true
+    log "Set cpu-yield=true"
 
     ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${curr_ovs_pid}.ctl  ovsdb-tool/auto-reconnect true >> /dev/null
     [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-tool/auto-reconnect true error" && return 1
@@ -289,6 +305,7 @@ function prepare_upgrade(){
     [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-server/reconnect error" && return 1
     log "The ovs-vswitchd ${curr_ovs_pid} has disconnect the ovsdb"
     
+    dpdk-devbind -b vfio-pci 0000:$next_vf1 >> /dev/null
     ovs-vsctl --no-wait set interface dpdk1 options:dpdk-devargs=0000:$next_vf1
     [ $? -ne 0 ] && log_echo "set $pid dpdk-devargs=0000:$next_vf1 error" && return 1
     #ovs-vsctl --no-wait set interface dpdk2 options:dpdk-devargs=0000:$next_vf2
@@ -296,6 +313,7 @@ function prepare_upgrade(){
     
     log "Vf has been set to $next_vf1"
     
+    ovs-vsctl --no-wait set bridge ${br_name} datapath_id=$next_dpid
     ovs-vsctl --no-wait set bridge ${br_name} other_config:datapath-id=$next_dpid
     [ $? -ne 0 ] && log_echo "set bridge datapath-id=$next_dpid error" && return 1
     log "set bridge datapath-id=$next_dpid"
@@ -332,11 +350,12 @@ function swap_vhost_user(){
             [ -z "$mac" ] || [ -z "$vni" ] && log_echo "Get port $port mac $mac; vni $vni error, swap error" && continue
             log "port $port mac $mac; vni $vni is starting to swap"
             
-            didicloud_filterops del $vni $mac 
-            [ $? -ne 0 ] && log_echo "port $port didicloud_filter del $vni $mac error" 
-            didicloud_filterops add $vni $mac
+            didicloud_filter del $vni $mac 
+            [ $? -ne 0 ] && log_echo "port $port didicloud_filter del $vni $mac error" && continue
+            didicloud_filter add $vni $mac &
             [ $? -ne 0 ] && log_echo "port $port didicloud_filter add $vni $mac error" && continue
-            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${new_pid}.ctl netdev-dpdk/reconnect $port >> /dev/null
+            
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${new_pid}.ctl netdev-dpdk/reconnect $port >> /dev/null &
             if [ $? -eq 0 ];then
                 log_echo "Port $port has swap to vswitch $new_pid"
             else
@@ -359,7 +378,7 @@ function upgrade_vhost_user(){
     check_stage "upgrade"
     [ $? -ne 0 ] && return 1
     exe_port=$1
-    [ -z "$exe_port" ] && log_echo "Must input a port name or all" && return
+    [ -z "$exe_port" ] && log_echo "Must input a port name or all" && return 1
     
     log "Starting ovs hot upgrade process"
     
@@ -369,6 +388,10 @@ function upgrade_vhost_user(){
         log "tnl_set_arp has been execute"
         next_ovs_pid=`cat $next_pid`  
         log_echo "New ovs-vswithd process $next_ovs_pid has been start up"
+        ovs-vsctl --no-wait set bridge ${br_name} other_config:datapath-id=$next_dpid
+        [ $? -ne 0 ] && log_echo "set bridge datapath-id=$next_dpid error" && return 1
+        log "set bridge datapath-id=$next_dpid"
+        sleep 5
     fi
     
     log "new_pid $next_ovs_pid"
@@ -389,11 +412,14 @@ function upgrade_over(){
     ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${curr_ovs_pid}.ctl  exit
     [ $? -ne 0 ] && log_echo "Ovs-vswithd $curr_ovs_pid exit error" && return 1
     
+    dpdk-devbind -u 0000:$curr_vf1 >> /dev/null
+    
     delete_veth_bak
     
     ovs-vsctl --no-wait set Open_vSwitch . other_config:vhostuser-no-autoconnect=false
     log "Set vhostuser-no-autoconnect=false"
-    
+    ovs-vsctl --no-wait set Open_vSwitch . other_config:cpu-yield=false
+    log "Set cpu-yield=false"
     ipam_unlock
     [ $? -ne 0 ] && return 1
     
@@ -404,6 +430,19 @@ function upgrade_over(){
 
 # Reset the configuration to the status before upgrade
 function reset_env(){
+    ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${next_ovs_pid}.ctl  ovsdb-tool/auto-reconnect false >> /dev/null
+    [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-tool/auto-reconnect true error" && return 1
+    
+    ovs-appctl -t ovsdb-server ovsdb-server/reconnect
+    [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-server/reconnect error" && return 1
+    log "The ovs-vswitchd ${curr_ovs_pid} has disconnect the ovsdb"
+    
+    ovs-vsctl --no-wait  set interface dpdk1 options:dpdk-devargs=0000:$curr_vf1
+    [ $? -ne 0 ] && log_echo "reset_env" "set $curr_ovs_pid dpdk-devargs=0000:$curr_vf1 error" && return 1
+    #ovs-vsctl --no-wait  set interface dpdk2 options:dpdk-devargs=0000:$curr_vf2
+    #[ $? -ne 0 ] && log_echo "reset_env" "set $curr_ovs_pid dpdk-devargs=0000:$curr_vf2 error" && return
+    log "Vf has been set to $curr_vf1"
+    
     if [ $next_ovs_pid -ne 0 ];then
         swap_vhost_user $curr_ovs_pid "all"
     fi
@@ -416,6 +455,9 @@ function reset_env(){
         sleep 1    
     fi
     
+    dpdk-devbind -u 0000:$next_vf1 >> /dev/null
+    dpdk-devbind -b vfio-pci 0000:$curr_vf1 >> /dev/null
+    
     ovs-vsctl --no-wait set bridge ${br_name} other_config:datapath-id=$curr_dpid
     [ $? -ne 0 ] && log_echo "set bridge datapath-id=$curr_dpid error" && return 1
     log "set bridge datapath-id=$curr_dpid"
@@ -425,17 +467,12 @@ function reset_env(){
     sed -ie 's/${mode_str}/OVS_MODE=\"$curr_mode\"/g' $ovs_conf
     log "ovs-prefix has been set to active"
     
-    ovs-vsctl --no-wait  set interface dpdk1 options:dpdk-devargs=0000:$curr_vf1
-    [ $? -ne 0 ] && log_echo "reset_env" "set $curr_ovs_pid dpdk-devargs=0000:$curr_vf1 error" && return 1
-    #ovs-vsctl --no-wait  set interface dpdk2 options:dpdk-devargs=0000:$curr_vf2
-    #[ $? -ne 0 ] && log_echo "reset_env" "set $curr_ovs_pid dpdk-devargs=0000:$curr_vf2 error" && return
-    
-    log "Vf has been set to $curr_vf1"
-    
     delete_veth_bak
 
     ovs-vsctl --no-wait set Open_vSwitch . other_config:vhostuser-no-autoconnect=false
     log "Set vhostuser-no-autoconnect=false"
+    ovs-vsctl --no-wait set Open_vSwitch . other_config:cpu-yield=false
+    log "Set cpu-yield=false"
     ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${curr_ovs_pid}.ctl  ovsdb-tool/auto-reconnect true >> /dev/null
     [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-tool/auto-reconnect true error" && return 1
     
@@ -484,9 +521,10 @@ function usage(){
 
 function usage_detach(){
     echo "USAGE: "
-    echo "   -i        System bond4 interface name"
-    echo "   -h        System bond4 interface ip address"
+    echo "   -i        System data interface name"
+    echo "   -h        System data interface ip address"
     echo "   -p        Ipam conf, ipaddress:port"
+    echo "   -t        Stress test interval(300-3600)s"
 }
 
 function show_log(){
@@ -674,9 +712,8 @@ fi
 
 sys_env_check
 [ $? -ne 0 ] && exit
-echo $$ > $pid_file
 
-while getopts "i:h:p:" arg
+while getopts "i:h:p:t:" arg
 do
     case $arg in
         i)
@@ -688,6 +725,13 @@ do
         p)
             ipam_conf=$OPTARG
             ;;
+        t)
+            interval=$OPTARG
+            if [ $interval -lt 300 ] || [ $interval -gt 3600 ];then
+                usage_detach
+                exit
+            fi
+            ;;
         *)
             usage_detach
             exit
@@ -695,12 +739,21 @@ do
     esac
 done 
 
+echo $$ > $pid_file
 if [ $# -eq 0 ];then
     cmdline
 else
     show_config
     show_status
-    all_process_with_reset
+    while [ 1 ];
+    do
+        all_process_with_reset
+        if [ $interval -eq 0 ];then
+            break
+        else
+            sleep $interval
+        fi
+    done
 fi
 
 rm -f $pid_file
