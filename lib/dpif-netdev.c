@@ -32,6 +32,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "common.h"
 #include "bitmap.h"
 #include "cmap.h"
 #include "conntrack.h"
@@ -3278,6 +3279,39 @@ dp_netdev_pmd_flush_output_packets(struct dp_netdev_pmd_thread *pmd,
     return output_cnt;
 }
 
+/*
+* @ Vxlan packet pop header, if the packet is not ip packet, return packet immediately
+* fix CHHISHUI-2432 bug by zq
+*/
+static  struct dp_packet * dp_netdev_vxlan_pop_header(struct dp_packet *packet,
+    uint16_t *is_vxlan_packet)
+{
+    ovs_be32 packet_type = packet->packet_type;
+    const struct eth_header *data = (struct eth_header *)dp_packet_data(packet);
+    size_t size = dp_packet_size(packet);
+    ovs_be16 dl_type = OVS_BE16_MAX;
+
+    if (packet_type == htonl(PT_ETH)) {
+        dl_type = parse_dl_type(data, size);
+	if (OVS_UNLIKELY(dl_type != htons(ETH_TYPE_IP))){
+            VLOG_DBG("the dl_type %x is not ip  type %x.", ntohs(dl_type), ETH_TYPE_IP);
+            *is_vxlan_packet = 0;
+            return packet;
+	}
+    }
+
+     /*
+     * we missed mini flow extract and only udp/ipv4 packet
+     * for current scenario.
+     */
+    packet->l3_ofs = sizeof (struct eth_header);
+    packet->l4_ofs = sizeof (struct eth_header) + IP_HEADER_LEN;
+    *is_vxlan_packet = 1;
+
+    /*Warning: Packets from the dpdk port must be right vxlan packets or arp broadcast packet,  otherwise there is a freed memory be used*/
+    return netdev_vxlan_pop_header(packet);
+}
+
 static int
 dp_netdev_process_rxq_port(struct dp_netdev_pmd_thread *pmd,
                            struct dp_netdev_rxq *rxq,
@@ -3291,6 +3325,7 @@ dp_netdev_process_rxq_port(struct dp_netdev_pmd_thread *pmd,
     struct dp_packet *packet;
     struct dp_packet_batch *batch_;
     struct dp_packet *packet_tmp;
+     uint16_t is_vxlan_packet = 0;
 
     /* Measure duration for polling and processing rx burst. */
     cycle_timer_start(&pmd->perf_stats, &timer);
@@ -3305,9 +3340,9 @@ dp_netdev_process_rxq_port(struct dp_netdev_pmd_thread *pmd,
         if (strcmp(rxq->port->type, "dpdk") == 0) {
             /* At least one packet received. */
             DP_PACKET_BATCH_REFILL_FOR_EACH (i, size, packet, batch_) {
-                packet = netdev_vxlan_pop_header(packet);
+                packet = dp_netdev_vxlan_pop_header(packet, &is_vxlan_packet);
                 //packet = netdev->netdev_class->pop_header(packet);
-                if (packet) {
+                if (packet && is_vxlan_packet) {
                     /* Reset the checksum offload flags if present, to avoid wrong
                      * interpretation in the further packet processing when
                      * recirculated.*/

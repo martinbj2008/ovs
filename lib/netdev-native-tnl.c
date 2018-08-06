@@ -512,12 +512,8 @@ netdev_vxlan_pop_header(struct dp_packet *packet)
     ovs_be32 vx_flags;
     enum packet_type next_pt = PT_ETH;
 
-    /*
-     * we missed mini flow extract and only udp/ipv4 packet
-     * for current scenario.
-     */
-    packet->l3_ofs = sizeof (struct eth_header);
-    packet->l4_ofs = sizeof (struct eth_header) + IP_HEADER_LEN;
+    ovs_assert(packet->l3_ofs > 0);
+    ovs_assert(packet->l4_ofs > 0);
 
     pkt_metadata_init_tnl(md);
     if (VXLAN_HLEN > dp_packet_l4_size(packet)) {
