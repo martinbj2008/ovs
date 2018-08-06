@@ -3291,13 +3291,19 @@ static  struct dp_packet * dp_netdev_vxlan_pop_header(struct dp_packet *packet,
     size_t size = dp_packet_size(packet);
     ovs_be16 dl_type = OVS_BE16_MAX;
 
-    if (packet_type == htonl(PT_ETH)) {
-        dl_type = parse_dl_type(data, size);
-	if (OVS_UNLIKELY(dl_type != htons(ETH_TYPE_IP))){
+    if (unlikely(size < sizeof (struct eth_header))){
+        dp_packet_delete(packet);
+        return NULL;
+    }
+
+    if (data && (packet_type == htonl(PT_ETH))) {
+        dl_type = data->eth_type;
+	    if (OVS_UNLIKELY(dl_type != htons(ETH_TYPE_IP))){
             VLOG_DBG("the dl_type %x is not ip  type %x.", ntohs(dl_type), ETH_TYPE_IP);
             *is_vxlan_packet = 0;
-            return packet;
-	}
+            dp_packet_delete(packet);
+            return NULL;
+	    }
     }
 
      /*
