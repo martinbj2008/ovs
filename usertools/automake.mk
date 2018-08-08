@@ -16,4 +16,5 @@ EXTRA_DIST += \
 		usertools/ovs_post_check  \
 		usertools/ovs_stop  \
 		usertools/ovs_restart  \
-		usertools/tnl_set_arp
+		usertools/tnl_set_arp  \
+		usertools/tnl_set_arp.conf
