@@ -375,6 +375,8 @@ typedef struct sg_rule{
 struct sg_list{
     sg_rule_t sg_list[MAX_SG_RULE];
     int sg_cnt;
+    uint64_t icmp_drop_cnt;
+    uint64_t tcp_drop_cnt;
 };
 
 /*
@@ -2092,29 +2094,33 @@ static void netdev_dpdk_sg_show(struct unixctl_conn *conn, int argc OVS_UNUSED,
         ovs_mutex_lock(&dev->mutex);
         sgl = &dev->sg_list_table;
         if (vhost == NULL || strcmp(vhost, netdev_get_name(&dev->up)) == 0) {
-            if(proto == NULL || strcmp(proto, "icmp") == 0){
-                for(; i < sgl->sg_cnt; i++){
-                    if(sgl->sg_list[i].proto == IPPROTO_ICMP){
-                        in.s_addr = sgl->sg_list[i].ip;
-                        inet_ntop(AF_INET, (void *)&in, ipstr, sizeof(ipstr));
-                        ds_put_format(&ds, "vhost=%s,mac=%s,proto=icmp,remoteIp=%s/%d,cnt=%lu\n", 
-                            netdev_get_name(&dev->up), sgl->sg_list[i].mac, ipstr, get_mask_len(ntohl(sgl->sg_list[i].mask)), sgl->sg_list[i].cnt);
+            if(dev->type == DPDK_DEV_VHOST){
+                ds_put_format(&ds, "vhost=%s,icmp_drop_cnt=%lu,tcp_drop_cnt=%lu\n", 
+                    netdev_get_name(&dev->up), sgl->icmp_drop_cnt, sgl->tcp_drop_cnt);
+                if(proto == NULL || strcmp(proto, "icmp") == 0){
+                    for(i = 0; i < sgl->sg_cnt; i++){
+                        if(sgl->sg_list[i].proto == IPPROTO_ICMP){
+                            in.s_addr = sgl->sg_list[i].ip;
+                            inet_ntop(AF_INET, (void *)&in, ipstr, sizeof(ipstr));
+                            ds_put_format(&ds, "vhost=%s,mac=%s,proto=icmp,remoteIp=%s/%d,cnt=%lu\n", 
+                                netdev_get_name(&dev->up), sgl->sg_list[i].mac, ipstr, get_mask_len(ntohl(sgl->sg_list[i].mask)), sgl->sg_list[i].cnt);
+                        }
                     }
                 }
-            }
 
-            if(proto == NULL || strcmp(proto, "tcp") == 0){
-                for(i = 0; i < sgl->sg_cnt; i++){
-                    if(sgl->sg_list[i].proto == IPPROTO_TCP){
-                        in.s_addr = sgl->sg_list[i].ip;
-                        inet_ntop(AF_INET, (void *)&in, ipstr, sizeof(ipstr));
-                        ds_put_format(&ds,  "vhost=%s,mac=%s,proto=tcp,remoteIp=%s/%d,portMin=%hu,portMax=%hu,cnt=%lu\n", 
-                            netdev_get_name(&dev->up), sgl->sg_list[i].mac, ipstr, get_mask_len(ntohl(sgl->sg_list[i].mask)), 
-                            ntohs(sgl->sg_list[i].min_port), ntohs(sgl->sg_list[i].max_port), sgl->sg_list[i].cnt);
+                if(proto == NULL || strcmp(proto, "tcp") == 0){
+                    for(i = 0; i < sgl->sg_cnt; i++){
+                        if(sgl->sg_list[i].proto == IPPROTO_TCP){
+                            in.s_addr = sgl->sg_list[i].ip;
+                            inet_ntop(AF_INET, (void *)&in, ipstr, sizeof(ipstr));
+                            ds_put_format(&ds,  "vhost=%s,mac=%s,proto=tcp,remoteIp=%s/%d,portMin=%hu,portMax=%hu,cnt=%lu\n", 
+                                netdev_get_name(&dev->up), sgl->sg_list[i].mac, ipstr, get_mask_len(ntohl(sgl->sg_list[i].mask)), 
+                                ntohs(sgl->sg_list[i].min_port), ntohs(sgl->sg_list[i].max_port), sgl->sg_list[i].cnt);
+                        }
                     }
                 }
+                exist_port = 1;
             }
-            exist_port = 1;
         }
         ovs_mutex_unlock(&dev->mutex);
     }
@@ -2155,8 +2161,12 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
         protocol = IPPROTO_TCP;
     }else if(strcmp(proto, "icmp") == 0){
         protocol = IPPROTO_ICMP;
+        minp = NULL;
+        maxp = NULL;
     }else{
         unixctl_command_reply(conn, "Invaild proto\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild proto", 
+            vhost, mac, proto, ipmask, minp, maxp);
         return; 
     }
     
@@ -2169,11 +2179,15 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
     ret = sscanf(ipmask, "%s %d", ip, &mask);
     if(ret != 2 || mask > 32 || mask < 0){
         unixctl_command_reply(conn, "Invaild Ip address/mask\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild Ip address/mask", 
+            vhost, mac, proto, ipmask, minp, maxp);
         return;
     }
 
     if(inet_pton(AF_INET, ip, &in) < 0){
         unixctl_command_reply(conn, "Invaild Ip address/mask\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild Ip address/mask", 
+            vhost, mac, proto, ipmask, minp, maxp);
         return;
     }
 
@@ -2181,6 +2195,8 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
     mask_t = htonl(mask_t);
     if((mask_t & in.s_addr) != in.s_addr){
         unixctl_command_reply(conn, "Invaild Ip address/mask\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild Ip address/mask", 
+            vhost, mac, proto, ipmask, minp, maxp);
         return;
     }
     
@@ -2192,6 +2208,8 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
     if(protocol == IPPROTO_TCP && (min_port > max_port || min_port > 65535 || 
         min_port < 1 || max_port > 65535 || max_port < 1)){ 
         unixctl_command_reply(conn, "Invaild Port\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild Port", 
+            vhost, mac, proto, ipmask, minp, maxp);
         return; 
     }
 
@@ -2206,10 +2224,16 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
             ret = sg_rule_insert(&dev->sg_list_table, mac, protocol, min_port,max_port, in.s_addr, mask_t);
             if(ret == -1){
                 unixctl_command_reply(conn, "Exist Rule\n");
+                VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Exist Rule", 
+                    vhost, mac, proto, ipmask, minp, maxp);
             }else if(ret == -2){
                 unixctl_command_reply(conn, "Cannot add more than 1000 rules\n");
+                VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Cannot add more than 1000 rules", 
+                    vhost, mac, proto, ipmask, minp, maxp);
             }else{
                 unixctl_command_reply(conn, "OK\n");
+                VLOG_INFO("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Add OK", 
+                    vhost, mac, proto, ipmask, minp, maxp);
             }
           ovs_mutex_unlock(&dev->mutex);
           ovs_mutex_unlock(&dpdk_mutex);
@@ -2221,11 +2245,14 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
     ovs_mutex_unlock(&dpdk_mutex);
 
     unixctl_command_reply(conn, "Not exist device.\n");  
+    VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Not exist device.", 
+                    vhost, mac, proto, ipmask, minp, maxp);
 }
 
 static void netdev_dpdk_sg_del(struct unixctl_conn *conn, int argc OVS_UNUSED,
                 const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED){
     const char *vhost = argv[1];
+    const char *mac = argv[2];
     const char *proto = argv[3]; 
     const char *ipmask = argv[4];
     const char *minp = argv[5];
@@ -2247,8 +2274,12 @@ static void netdev_dpdk_sg_del(struct unixctl_conn *conn, int argc OVS_UNUSED,
         protocol = IPPROTO_TCP;
     }else if(strcmp(proto, "icmp") == 0){
         protocol = IPPROTO_ICMP;
+        minp = NULL;
+        maxp = NULL;
     }else{
         unixctl_command_reply(conn, "Invaild proto\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild proto.", 
+                    vhost, mac, proto, ipmask, minp, maxp);
         return; 
     }
 
@@ -2260,19 +2291,25 @@ static void netdev_dpdk_sg_del(struct unixctl_conn *conn, int argc OVS_UNUSED,
     }
     ret = sscanf(ipmask, "%s %d", ip, &mask);
     if(ret != 2){
-      unixctl_command_reply(conn, "Invaild Ip address/mask\n");
-      return;
+        unixctl_command_reply(conn, "Invaild Ip address/mask\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild Ip address/mask.", 
+                    vhost, mac, proto, ipmask, minp, maxp);
+        return;
     }
 
     if(inet_pton(AF_INET, ip, &in) < 0){
-      unixctl_command_reply(conn, "Invaild Ip address/mask\n");
-      return;
+        unixctl_command_reply(conn, "Invaild Ip address/mask\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild Ip address/mask.", 
+                    vhost, mac, proto, ipmask, minp, maxp);
+        return;
     }
 
     mask_t = mask ? 0xffffffff << (32 - mask) : 0;
     mask_t = htonl(mask_t);
     if((mask_t & in.s_addr) != in.s_addr){
         unixctl_command_reply(conn, "Invaild Ip address/mask\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild Ip address/mask.", 
+                    vhost, mac, proto, ipmask, minp, maxp);
         return;
     }
     
@@ -2284,6 +2321,8 @@ static void netdev_dpdk_sg_del(struct unixctl_conn *conn, int argc OVS_UNUSED,
      if(protocol == IPPROTO_TCP && (min_port > max_port || min_port > 65535 || 
         min_port < 1 || max_port > 65535 || max_port < 1)){ 
         unixctl_command_reply(conn, "Invaild Port\n");
+        VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild Port.", 
+                    vhost, mac, proto, ipmask, minp, maxp);
         return; 
     }
 
@@ -2299,8 +2338,12 @@ static void netdev_dpdk_sg_del(struct unixctl_conn *conn, int argc OVS_UNUSED,
         if (strcmp(vhost, netdev_get_name(&dev->up)) == 0) {
              if(sg_rule_remove(&dev->sg_list_table, protocol, min_port,max_port, in.s_addr, mask_t) == -1){
                 unixctl_command_reply(conn, "NO Exist Rule\n");
+                VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], NO Exist Rule.", 
+                    vhost, mac, proto, ipmask, minp, maxp);
             }else{
                 unixctl_command_reply(conn, "OK\n");
+                VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Del OK.", 
+                    vhost, mac, proto, ipmask, minp, maxp);
             }
           ovs_mutex_unlock(&dev->mutex);
           ovs_mutex_unlock(&dpdk_mutex);
@@ -2311,6 +2354,8 @@ static void netdev_dpdk_sg_del(struct unixctl_conn *conn, int argc OVS_UNUSED,
 
     ovs_mutex_unlock(&dpdk_mutex);
 
+    VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Not exist device.", 
+                    vhost, mac, proto, ipmask, minp, maxp);
     unixctl_command_reply(conn, "Not exist device.\n");
 }
 
@@ -2334,6 +2379,7 @@ static int sg_rule_filter(struct netdev_dpdk *dev, struct rte_mbuf* mbuf){
             sizeof(struct ether_hdr) + (IPV4_HDR_IHL_MASK & iph->version_ihl) * sizeof(uint32_t));
         if(tcph && (tcph->tcp_flags & TCP_SYN_FLAG) && !(tcph->tcp_flags & TCP_ACK_FLAG)){
             if(sg_rule_check(&dev->sg_list_table, IPPROTO_TCP, tcph->dst_port, iph->src_addr) != 0){
+                dev->sg_list_table.tcp_drop_cnt++;
                 return -1;
             }
         }
@@ -2342,6 +2388,7 @@ static int sg_rule_filter(struct netdev_dpdk *dev, struct rte_mbuf* mbuf){
             sizeof(struct ether_hdr) + (IPV4_HDR_IHL_MASK & iph->version_ihl) * sizeof(uint32_t));
         if(icmph && icmph->icmp_type == IP_ICMP_ECHO_REQUEST){
             if(sg_rule_check(&dev->sg_list_table, IPPROTO_ICMP, 0, iph->src_addr) != 0){
+                dev->sg_list_table.icmp_drop_cnt++;
                 return -1;
             }
         }
@@ -2416,8 +2463,6 @@ netdev_dpdk_sg_filter(struct netdev_dpdk *dev, struct rte_mbuf **pkts,
   for (i = 0; i < pkt_cnt; i++) {
       pkt = pkts[i];
       if (sg_rule_filter(dev, pkt) == -1) {
-          VLOG_WARN_RL(&rl, "%s: Too big size %" PRIu32 " max_packet_len %d",
-                       dev->up.name, pkt->pkt_len, dev->max_packet_len);
           rte_pktmbuf_free(pkt);
           continue;
       }
