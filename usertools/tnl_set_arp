@@ -64,7 +64,7 @@ br=$1
 interval=$3
 
 ip=`ovs-vsctl --no-wait get interface vtep option:local_ip| sed 's/\"//g'`
-dev=`ifconfig |grep -B 2 $ip | sed -n "1p" | gawk '{print $1}'| sed 's/\://g'`
+dev=`ip addr |grep -B 2 $ip | sed -n "1p" | gawk '{print $2}'| sed 's/\://g'`
 
 if [ -z $br ] || [ -z $dev ];then
     echo "USAGE:"
