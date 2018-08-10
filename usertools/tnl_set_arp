@@ -61,14 +61,14 @@ function confarp() {
 }
 
 br=$1
-dev=$2
 interval=$3
 
-
+ip=`ovs-vsctl --no-wait get interface vtep option:local_ip| sed 's/\"//g'`
+dev=`ifconfig |grep -B 2 $ip | sed -n "1p" | gawk '{print $1}'| sed 's/\://g'`
 
 if [ -z $br ] || [ -z $dev ];then
     echo "USAGE:"
-    echo "CMD symbol $0 br-name interface interval(>= 30)"
+    echo "CMD symbol $0 br-name interval(>= 30)"
     exit
 else
     if [ -z "$interval" ];then
@@ -78,7 +78,7 @@ else
         exit
     elif [ $interval -lt 30 ];then
         echo "USAGE:"
-        echo "CMD symbol $0 br-name interface interval(>= 30)"
+        echo "CMD symbol $0 br-name interval(>= 30)"
         exit
     fi
 fi
