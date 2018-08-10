@@ -351,7 +351,7 @@ function swap_vhost_user(){
             log "port $port mac $mac; vni $vni is starting to swap"
             
             didicloud_filter del $vni $mac 
-            [ $? -ne 0 ] && log_echo "port $port didicloud_filter del $vni $mac error" && continue
+            [ $? -ne 0 ] && log_echo "port $port didicloud_filter del $vni $mac error"
             didicloud_filter add $vni $mac &
             [ $? -ne 0 ] && log_echo "port $port didicloud_filter add $vni $mac error" && continue
             
