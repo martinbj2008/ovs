@@ -5,7 +5,7 @@
 logdir='/usr/local/var/log/openvswitch'
 rundir="/usr/local/var/run/openvswitch"
 sysconfdir='/etc'
-etcdir='$sysconfdir/openvswitch'     
+etcdir='$sysconfdir/openvswitch'	 
 scriptdir='/usr/local/share/openvswitch/scripts/'
 datadir='/usr/local/share/openvswitch'
 dbdir='/usr/local/etc/openvswitch'
@@ -16,32 +16,40 @@ DB_FILE=$dbdir/conf.db
 DB_SOCK=$rundir/db.sock
 DB_SCHEMA=$datadir/vswitch.ovsschema
 
-KERNEL_VERSION="3.10.0-514.16.1.chishui01.x86_64"
-
 ovsCheck()
 {
-    echo -e "\e[1;32m[ovs-dpdk] Checking system version \e[0m" 	
-    echo ""	
+	echo -e "\e[1;32m[ovs-dpdk] Checking system version \e[0m"	
+	echo ""	
 
-    sysOS=`uname -r`
+	sysOS=`uname -r`
 
-    if [ $sysOS == $KERNEL_VERSION ]; then
-        echo -e "\e[1;32m[ovs-dpdk] System OS version is Correct \e[0m" 	
-        echo ""	
-    else
-        echo -e "\e[1;31m[ovs-dpdk] $HOST System OS version supposed be $KERNEL_VERSION \e[0m"
-        echo ""	
-        exit -1
-    fi
+	if [ $sysOS == $KERNEL_VERSION ]; then
+		echo -e "\e[1;32m[ovs-dpdk] System OS version is Correct \e[0m"		
+		echo ""	
+	else
+		echo -e "\e[1;31m[ovs-dpdk] ERROR: $HOST System OS version supposed be $KERNEL_VERSION \e[0m"
+		echo ""	
+		exit -1
+	fi
 }
 
 echo
 echo '===== OVS-DPDK Stop ====='
 echo
 
+conf_file=/etc/openvswitch/ovs-dpdk.conf
+
+if test -e $conf_file; then  
+	source $conf_file
+else
+	echo -e "\e[1;31m[ovs-dpdk] ERROR: Could not find ovs-dpdk.conf \e[0m"
+	echo ""	
+	exit -1
+fi
+
 osCheck
 
-$scriptdir/ovs-ctl stop
+$scriptdir/ovs-ctl --system-id=random stop
 
 echo
 echo '===== END ====='

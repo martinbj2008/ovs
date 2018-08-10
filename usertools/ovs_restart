@@ -39,9 +39,20 @@ echo
 echo '===== OVS-DPDK ReStart ====='
 echo
 
+conf_file=/etc/openvswitch/ovs-dpdk.conf
+
+if test -e $conf_file; then  
+	source $conf_file
+else
+	echo -e "\e[1;31m[ovs-dpdk] ERROR: Could not find ovs-dpdk.conf \e[0m"
+	echo ""	
+	exit -1
+fi
+
+
 osCheck
 
-$scriptdir/ovs-ctl restart
+$scriptdir/ovs-ctl --system-id=random restart
 
 echo
 echo '===== END ====='
