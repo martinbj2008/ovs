@@ -1,5 +1,12 @@
 #!/bin/sh
 
+log_file="/tmp/tnl_set_arp_log"
+
+function log(){
+    date=`date +"%Y-%m-%d--%H:%m:%S"`
+    echo "${date} --- $1" >> $log_file
+}
+
 function iptohex() {
     IFS=.
     _ip=$1
@@ -37,6 +44,9 @@ function sendarp(){
 function confarp() {
     _br=$1
     _dev=$2
+    
+    arp -n >> $log_file
+    
     pid_cnt=`ps -ax|grep ovs-vswitchd|grep -v monitoring| grep -v grep|gawk '{print $1}'|wc -l`
 
     deault_gw=`ip route show |grep default|gawk '{print $3}'`
@@ -47,6 +57,7 @@ function confarp() {
     do
         pid=`ps -ax|grep ovs-vswitchd|grep -v monitoring| grep -v grep|gawk '{print $1}'|sed -n "${j}p"`
         ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $deault_gw $default_mac 2>&1 >> /dev/null
+        log "Set arp $deault_gw $default_mac"
 
         arp_cnt=`arp -n |grep -v incomplete |grep $_dev|wc -l`
         i=1
@@ -54,6 +65,7 @@ function confarp() {
             ip=`arp -n |grep -v incomplete |grep $_dev|gawk '{print $1}'|sed -n "${i}p"`
             mac=`arp -n |grep -v incomplete |grep $_dev|gawk '{print $3}'|sed -n "${i}p"`
             ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${pid}.ctl tnl/arp/set $_br $ip $mac 2>&1 >> /dev/null
+            log "Set arp $ip $mac"
             i=`expr $i + 1`
         done
         j=`expr $j + 1`
@@ -61,14 +73,12 @@ function confarp() {
 }
 
 br=$1
+dev=$2
 interval=$3
 
-ip=`ovs-vsctl --no-wait get interface vtep option:local_ip| sed 's/\"//g'`
-dev=`ip addr |grep -B 2 $ip | sed -n "1p" | gawk '{print $2}'| sed 's/\://g'`
-
-if [ -z $br ] || [ -z $dev ];then
+if [ -z $br ] || [ -z  $dev ];then
     echo "USAGE:"
-    echo "CMD symbol $0 br-name interval(>= 30)"
+    echo "CMD symbol $0 br-name NIC interval(>= 30)"
     exit
 else
     if [ -z "$interval" ];then
@@ -78,7 +88,7 @@ else
         exit
     elif [ $interval -lt 30 ];then
         echo "USAGE:"
-        echo "CMD symbol $0 br-name interval(>= 30)"
+        echo "CMD symbol $0 br-name NIC interval(>= 30)"
         exit
     fi
 fi
