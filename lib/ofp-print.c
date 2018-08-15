@@ -66,6 +66,7 @@ ofp_packet_to_string(const void *data, size_t len, ovs_be32 packet_type)
     struct flow flow;
     size_t l4_size;
 
+    memset(&buf, 0, sizeof(struct dp_packet));
     dp_packet_use_const(&buf, data, len);
     buf.packet_type = packet_type;
     flow_extract(&buf, &flow);
