@@ -125,16 +125,6 @@ threadCheck()
 	fi
 }
 
-qemuCheck()
-{
-	rpm -qa | grep $QEMU_VERSION > /dev/null
-	if [ $? -ne 0 ] ; then
-		echo -e "\e[1;31m[ovs-dpdk] Qemu Version supposed be $QEMU_VERSION \e[0m"
-		echo ""	
-		exit -1
-	fi
-}
-
 hugepageCheck()
 {
 	grep -s "$mountdir" /proc/mounts > /dev/null
@@ -191,49 +181,6 @@ sriovCheck()
 		echo -e "\e[1;31m[ovs-dpdk] NIC num is not expected \e[0m"
 		echo ""	
 		exit -1
-	fi
-}
-
-vfioCheck()
-{
-	$sbindir/dpdk-devbind --status | grep "drv=vfio-pci" > /dev/null
-	if [ $? -eq 0 ] ; then
-		echo -e "\e[1;32m[ovs-dpdk] VFIO module bond VF port success \e[0m"
-		return 1
-	fi
-
-	modprobe vfio-pci
-
-	/sbin/lsmod | grep -s vfio_pci > /dev/null
-	if [ $? -ne 0 ] ; then
-		echo -e "\e[1;31m[ovs-dpdk] VFIO module modprobe failed \e[0m"
-		echo ""	
-		exit -1
-	else
-		echo -e "\e[1;32m[ovs-dpdk] VFIO module modprobe success \e[0m"
-		echo ""	
-	fi
-
-	/usr/bin/chmod a+x /dev/vfio
-	/usr/bin/chmod 0666 /dev/vfio/*
-
-	vf_pci=`lspci |grep X710|grep  Virtual | gawk '{print $1}' | sed -n '1p'`
-	if [[ $vf_pci ]];then
-		$sbindir/dpdk-devbind --bind=vfio-pci $vf_pci
-	else
-		echo -e "\e[1;31m[ovs-dpdk] VF Port num is not expected \e[0m"
-		echo ""	
-		exit -1
-	fi
-
-	$sbindir/dpdk-devbind --status | grep "drv=vfio-pci" > /dev/null
-	if [ $? -ne 0 ] ; then
-		echo -e "\e[1;31m[ovs-dpdk] ERROR: VFIO module bonding VF port failed \e[0m"
-		echo ""	
-		exit -1
-	else
-		echo -e "\e[1;32m[ovs-dpdk] VFIO module bonding VF port success \e[0m"
-		echo ""	
 	fi
 }
 
@@ -312,16 +259,13 @@ fi
 
 osCheck
 pkgCheck
-iommuCheck
 numaCheck
 threadCheck
-qemuCheck
 hugepageCheck
 toolsCheck
 sriovCheck
-#vfioCheck
-uioCheck;
-bindCheck;
+uioCheck
+bindCheck
 
 echo
 echo '===== END ====='
