@@ -221,15 +221,15 @@ function sys_env_check(){
         return 1
     fi
     
-    bind_vf=`dpdk-devbind -s | grep "XL710/X710 Virtual Function" |grep drv=vfio-pci | grep "${curr_vf1}" |gawk '{print $1}'`
+    bind_vf=`dpdk-devbind -s | grep "XL710/X710 Virtual Function" |grep drv=igb_uio | grep "${curr_vf1}" |gawk '{print $1}'`
     if [ -z "$bind_vf" ];then
-        log_echo "Vf pci $bind_vf should bind by vfio"
+        log_echo "Vf pci $bind_vf should bind by igb_uio"
         return 1
     fi
     
-    unbind_vf=`dpdk-devbind -s |grep "XL710/X710 Virtual Function" | grep drv=vfio-pci |grep "${next_vf1}"|gawk '{print $1}'`
+    unbind_vf=`dpdk-devbind -s |grep "XL710/X710 Virtual Function" | grep drv=igb_uio |grep "${next_vf1}"|gawk '{print $1}'`
     if [ -n "$unbind_vf" ];then
-        log_echo "Vf pci $unbind_vf cannot bind by vfio"
+        log_echo "Vf pci $unbind_vf cannot bind by igb_uio"
         return 1
     fi
     
@@ -305,7 +305,7 @@ function prepare_upgrade(){
     [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-server/reconnect error" && return 1
     log "The ovs-vswitchd ${curr_ovs_pid} has disconnect the ovsdb"
     
-    dpdk-devbind -b vfio-pci 0000:$next_vf1 >> /dev/null
+    dpdk-devbind -b igb_uio 0000:$next_vf1 >> /dev/null
     ovs-vsctl --no-wait set interface dpdk1 options:dpdk-devargs=0000:$next_vf1
     [ $? -ne 0 ] && log_echo "set $pid dpdk-devargs=0000:$next_vf1 error" && return 1
     #ovs-vsctl --no-wait set interface dpdk2 options:dpdk-devargs=0000:$next_vf2
@@ -456,7 +456,7 @@ function reset_env(){
     fi
     
     dpdk-devbind -u 0000:$next_vf1 >> /dev/null
-    dpdk-devbind -b vfio-pci 0000:$curr_vf1 >> /dev/null
+    dpdk-devbind -b igb_uio 0000:$curr_vf1 >> /dev/null
     
     ovs-vsctl --no-wait set bridge ${br_name} other_config:datapath-id=$curr_dpid
     [ $? -ne 0 ] && log_echo "set bridge datapath-id=$curr_dpid error" && return 1
