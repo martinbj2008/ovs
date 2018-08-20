@@ -132,12 +132,14 @@ hugepageCheck()
 		mount -t hugetlbfs none $mountdir
 	fi
 
-	echo $NR_HUGEPAGES > /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
-	echo $NR_HUGEPAGES > /sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages
-
 	pagesize=`awk '/Hugepagesize/ {print $2}' /proc/meminfo`
 	pagetotal=`awk '/HugePages_Total/ {print $2} ' /proc/meminfo`
 	if [ $pagesize -a $pagetotal ] ; then
+		if [ $pagesize -ne 2028 ]; then
+			echo -e "\e[1;32m[ovs-dpdk] Hugepage size supposed to be 2048 \e[0m"
+			echo ""	
+			exit -1
+		fi
 		echo -e "\e[1;32m[ovs-dpdk] Hugepage size : $pagesize Hugepage Total : $pagetotal \e[0m"
 		echo ""	
 	else
@@ -150,7 +152,7 @@ hugepageCheck()
 toolsCheck()
 {
 	if [ ! -f "$sbindir/dpdk-devbind" ]; then
-		yum install dpdk-tools.x86_64 -y > /dev/null
+		yum install dpdk-tools -y > /dev/null
 	fi
 
 	if [ ! -f "$sbindir/dpdk-devbind" ]; then
@@ -165,7 +167,8 @@ toolsCheck()
 
 sriovCheck()
 {
-	device=`ip route show default | awk '/default/ {print $5}'`
+	# device=`ip route show default | awk '/default/ {print $5}'`
+	device=$INTERFACE
 	if [[ $device ]];then
 		dev_num=`cat /sys/class/net/$device/device/sriov_numvfs`
 		lspci | grep 'Virtual Function' > /dev/null
@@ -222,8 +225,8 @@ bindCheck()
 		return 1
 	fi
 
-	vf_pci1=`lspci |grep X710|grep  Virtual | gawk '{print $1}' | sed -n '1p'`
-	vf_pci2=`lspci |grep X710|grep  Virtual | gawk '{print $1}' | sed -n '2p'`
+	vf_pci1=`lspci |grep X722|grep  Virtual | gawk '{print $1}' | sed -n '1p'`
+	vf_pci2=`lspci |grep X722|grep  Virtual | gawk '{print $1}' | sed -n '2p'`
 	if [[ $vf_pci1 && $vf_pci1 ]];then
 		$sbindir/dpdk-devbind --bind=igb_uio $vf_pci1
 	else
