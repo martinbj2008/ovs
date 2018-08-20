@@ -73,12 +73,12 @@ function confarp() {
 }
 
 br=$1
-dev=$2
+dev=`grep "INTERFACE" /etc/openvswitch/ovs-dpdk.conf |gawk -F '=' '{print $2}'|sed 's/\"//g'`
 interval=$3
 
 if [ -z $br ] || [ -z  $dev ];then
     echo "USAGE:"
-    echo "CMD symbol $0 br-name NIC interval(>= 30)"
+    echo "CMD symbol $0 br-name interval(>= 30)"
     exit
 else
     if [ -z "$interval" ];then
@@ -88,7 +88,7 @@ else
         exit
     elif [ $interval -lt 30 ];then
         echo "USAGE:"
-        echo "CMD symbol $0 br-name NIC interval(>= 30)"
+        echo "CMD symbol $0 br-name interval(>= 30)"
         exit
     fi
 fi
