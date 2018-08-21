@@ -75,8 +75,8 @@ bind_dpdk_port()
 			ip link set $ethname vf $var spoofchk off
 		done
 
-		vf_pci1=`lspci |grep X710|grep  Virtual | gawk '{print $1}' | sed -n '1p'`
-		vf_pci2=`lspci |grep X710|grep  Virtual | gawk '{print $1}' | sed -n '2p'`
+		vf_pci1=`lspci | grep $NIC_TYPE |grep  Virtual | gawk '{print $1}' | sed -n '1p'`
+		vf_pci2=`lspci | grep $NIC_TYPE |grep  Virtual | gawk '{print $1}' | sed -n '2p'`
 
 		if [[ $vf_pci1 && $vf_pci1 ]];then
 			write_log "[ovs-dpdk] SUCESS Obtain VF port '$vf_pci1' '$vf_pci2' via '$ethname'"

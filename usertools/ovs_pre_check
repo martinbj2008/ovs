@@ -135,8 +135,8 @@ hugepageCheck()
 	pagesize=`awk '/Hugepagesize/ {print $2}' /proc/meminfo`
 	pagetotal=`awk '/HugePages_Total/ {print $2} ' /proc/meminfo`
 	if [ $pagesize -a $pagetotal ] ; then
-		if [ $pagesize -ne $NR_HUGEPAGES ]; then
-			echo -e "\e[1;32m[ovs-dpdk] Hugepage size supposed to be $NR_HUGEPAGES\e[0m"
+		if [ $pagesize -ne 2048 ]; then
+			echo -e "\e[1;32m[ovs-dpdk] Hugepage size supposed to be 2048 \e[0m"
 			echo ""	
 			exit -1
 		fi
@@ -225,8 +225,8 @@ bindCheck()
 		return 1
 	fi
 
-	vf_pci1=`lspci |grep X722|grep  Virtual | gawk '{print $1}' | sed -n '1p'`
-	vf_pci2=`lspci |grep X722|grep  Virtual | gawk '{print $1}' | sed -n '2p'`
+	vf_pci1=`lspci |grep $NIC_TYPE |grep  Virtual | gawk '{print $1}' | sed -n '1p'`
+	vf_pci2=`lspci |grep $NIC_TYPE |grep  Virtual | gawk '{print $1}' | sed -n '2p'`
 	if [[ $vf_pci1 && $vf_pci1 ]];then
 		$sbindir/dpdk-devbind --bind=igb_uio $vf_pci1
 	else
