@@ -1,0 +1,121 @@
+#!/bin/bash
+
+conf_file='/etc/openvswitch/ovs-dpdk.conf'
+ovs_start='/usr/bin/ovs_start'
+log_file='/var/log/ovs_dpdk_'$(date +"%Y-%m-%d_%H-%M-%S")'.log'
+
+write_log()
+{
+	now_time='['$(date +"%Y-%m-%d %H:%M:%S")']'
+	echo ${now_time} $1 | tee -a ${log_file}
+}
+
+check_ether_name()
+{
+	local find_ether_flag=0
+	local ethname=$1
+	if [ X"$ethname" == X ];then
+		return 1
+	fi
+
+	local all_ethname=`cat /proc/net/dev | grep ':' | awk -F':' '{print $1}'`
+	for name in $all_ethname; do
+		if [ X"$name" == X"$ethname" ];then
+			find_ether_flag=1
+			fi
+	done
+
+	if [ $find_ether_flag == 0 ];then
+		return 1
+	fi
+
+	write_log "[ovs-dpdk] SUCCESS Obtain interface name '$ethname'"
+	return 0
+}
+
+bind2dpdk()
+{
+	local vf_pci=$1
+
+	if [ x"$vf_pci" == x ];then
+		write_log "[ovs-dpdk] bind2dpdk:ERROR invalid argument '$vf_pci'"
+		exit -1
+	fi
+
+	dpdk-devbind --bind=igb_uio $vf_pci
+	if [ $? != 0 ];then
+		write_log "[ovs-dpdk] bind2dpdk:ERROR bind '$vf_pci' failed"
+		exit -1
+	fi
+
+	write_log "[ovs-dpdk] SUCCESS bind VF port '$vf_pci' to igb_uio"
+	return 0
+}
+
+bind_dpdk_port()
+{
+	for ethname in "$@"; do
+		check_ether_name $ethname
+		if [ $? != 0 ];then
+			write_log "[ovs-dpdk] bind_dpdk_port:ERROR invalid argument '$ethname'"
+			exit -1
+		fi
+
+		dpdk-devbind --status | grep "drv=igb_uio" > /dev/null
+		if [ $? -eq 0 ] ; then
+			local pci=`dpdk-devbind --status | grep "drv=igb_uio" | awk -F' ' '{print $1}'`
+			write_log "[ovs-dpdk] SUCCESS bind VF port '$pci' to igb_uio"
+			return 1
+		fi
+
+		echo $SRIOV_NUM > /sys/class/net/$ethname/device/sriov_numvfs
+			
+		for ((var = 0; var < $SRIOV_NUM; var++))
+		do
+			ip link set $ethname vf $var spoofchk off
+		done
+
+		vf_pci1=`lspci |grep X710|grep  Virtual | gawk '{print $1}' | sed -n '1p'`
+		vf_pci2=`lspci |grep X710|grep  Virtual | gawk '{print $1}' | sed -n '2p'`
+
+		if [[ $vf_pci1 && $vf_pci1 ]];then
+			write_log "[ovs-dpdk] SUCESS Obtain VF port '$vf_pci1' '$vf_pci2' via '$ethname'"
+		else
+			write_log "[ovs-dpdk] ERROR Could not Obtain VF port via '$ethname'"
+			exit -1
+		fi
+
+		bind2dpdk $vf_pci1
+	done 
+}
+
+
+write_log "===== OVS-DPDK Recover from reboot start ====="
+
+modprobe uio
+modprobe igb_uio
+
+if test -e $conf_file; then  
+	source $conf_file
+else
+	write_log "[ovs-dpdk] ERROR Could not find $conf_file"
+	exit -1
+fi
+
+interface=$INTERFACE
+if [ -n "$interface" ] ; then
+	echo "$interface"
+	bind_dpdk_port $interface
+else
+	write_log "[ovs-dpdk] ERROR Could not obtain interface via $conf_file"
+	exit -1
+fi
+
+if [ -f $ovs_start ]; then
+	ovs_start
+else
+	write_log "[ovs-dpdk] ERROR Could not find scripts $ovs_start"
+	exit -1
+fi
+
+write_log "===== OVS-DPDK Recover from reboot success ====="

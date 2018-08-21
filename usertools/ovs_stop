@@ -47,8 +47,6 @@ else
 	exit -1
 fi
 
-osCheck
-
 $scriptdir/ovs-ctl --system-id=random stop
 
 echo

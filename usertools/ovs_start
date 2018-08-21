@@ -16,7 +16,7 @@ DB_FILE=$dbdir/conf.db
 DB_SOCK=$rundir/db.sock
 DB_SCHEMA=$datadir/vswitch.ovsschema
 
-ovsCheck()
+osCheck()
 {
 	echo -e "\e[1;32m[ovs-dpdk] Checking system version \e[0m"	
 	echo ""	
@@ -72,11 +72,9 @@ else
 	exit -1
 fi
 
-osCheck
-pkgCheck
 $scriptdir/ovs-ctl --system-id=random start
 
-/usr/local/bin/tnl_set_arp br-dpdk
+$bindir/tnl_set_arp br-dpdk
 sleep 5
 supervisorctl update
 

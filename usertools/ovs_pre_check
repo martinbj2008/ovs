@@ -135,8 +135,8 @@ hugepageCheck()
 	pagesize=`awk '/Hugepagesize/ {print $2}' /proc/meminfo`
 	pagetotal=`awk '/HugePages_Total/ {print $2} ' /proc/meminfo`
 	if [ $pagesize -a $pagetotal ] ; then
-		if [ $pagesize -ne 2028 ]; then
-			echo -e "\e[1;32m[ovs-dpdk] Hugepage size supposed to be 2048 \e[0m"
+		if [ $pagesize -ne $NR_HUGEPAGES ]; then
+			echo -e "\e[1;32m[ovs-dpdk] Hugepage size supposed to be $NR_HUGEPAGES\e[0m"
 			echo ""	
 			exit -1
 		fi
@@ -167,14 +167,13 @@ toolsCheck()
 
 sriovCheck()
 {
-	# device=`ip route show default | awk '/default/ {print $5}'`
 	device=$INTERFACE
 	if [[ $device ]];then
 		dev_num=`cat /sys/class/net/$device/device/sriov_numvfs`
 		lspci | grep 'Virtual Function' > /dev/null
 		if [ $? -ne 0 ] ; then
+
 			echo $SRIOV_NUM > /sys/class/net/$device/device/sriov_numvfs
-			
 			for ((var = 0; var < $SRIOV_NUM; var++))
 			do
 				ip link set $device vf $var spoofchk off
@@ -221,7 +220,8 @@ bindCheck()
 {
 	$sbindir/dpdk-devbind --status | grep "drv=igb_uio" > /dev/null
 	if [ $? -eq 0 ] ; then
-		echo -e "\e[1;32m[ovs-dpdk] IGB_UIO module bond VF port success \e[0m"
+		local pci=`dpdk-devbind --status | grep "drv=igb_uio" | awk -F' ' '{print $1}'`
+		echo -e "\e[1;32m[ovs-dpdk] IGB_UIO module bond VF port $pci success \e[0m"
 		return 1
 	fi
 

@@ -18,7 +18,7 @@ DB_SCHEMA=$datadir/vswitch.ovsschema
 
 KERNEL_VERSION="3.10.0-514.16.1.chishui01.x86_64"
 
-ovsCheck()
+osCheck()
 {
     echo -e "\e[1;32m[ovs-dpdk] Checking system version \e[0m" 	
     echo ""	
@@ -49,10 +49,7 @@ else
 	exit -1
 fi
 
-
-osCheck
-
-$scriptdir/ovs-ctl --system-id=random restart
+$scriptdir/ovs-ctl --system-id=random --no-ovsdb-server restart
 
 echo
 echo '===== END ====='
