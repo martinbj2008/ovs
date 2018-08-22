@@ -11,6 +11,7 @@ EXTRA_DIST += \
 		usertools/ovs-dpdk.conf  \
 		usertools/ovs-hotupgrade  \
 		usertools/README.rst  \
+		usertools/recover  \
 		usertools/ovs_pre_check  \
 		usertools/ovs_start  \
 		usertools/ovs_post_check  \
