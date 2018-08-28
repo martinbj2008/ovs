@@ -236,6 +236,20 @@ fork_and_clean_up(void)
     return pid;
 }
 
+/* Update tnl arp conf after ovs-vswitchd start or restart */
+static void
+set_arp_after_restart(){
+    FIlE *fp = NULL;
+
+    fp = popen("/usr/bin/tnl_set_arp br-dpdk", "r");
+    if(fp){
+        pclose(fp);
+        fp = NULL;
+    }else{
+        VLOG_ERR("Ovs pid(%u) popen tnl_set_arp Error.\n", getpid());
+    }
+}
+
 /* Forks, then:
  *
  *   - In the parent, waits for the child to signal that it has completed its
@@ -293,6 +307,7 @@ fork_and_wait_for_startup(int *fdp, pid_t *child_pid)
         }
         close(fds[0]);
         *fdp = -1;
+        set_arp_after_restart();
     } else if (!pid) {
         /* Running in child process. */
         close(fds[0]);
