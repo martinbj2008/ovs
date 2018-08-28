@@ -238,7 +238,7 @@ fork_and_clean_up(void)
 
 /* Update tnl arp conf after ovs-vswitchd start or restart */
 static void
-set_arp_after_restart(){
+set_arp_after_restart(void){
     FILE *fp = NULL;
 
     fp = popen("/usr/bin/tnl_set_arp br-dpdk", "r");
