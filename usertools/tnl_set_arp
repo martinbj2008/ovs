@@ -74,7 +74,7 @@ function confarp() {
 
 br=$1
 dev=`grep "INTERFACE" /etc/openvswitch/ovs-dpdk.conf |gawk -F '=' '{print $2}'|sed 's/\"//g'`
-interval=$3
+interval=$2
 
 if [ -z $br ] || [ -z  $dev ];then
     echo "USAGE:"
