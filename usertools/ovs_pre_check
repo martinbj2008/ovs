@@ -39,25 +39,6 @@ pkgCheck()
 	echo -e "\e[1;32m[ovs-dpdk] Checking essential pkg \e[0m"	
 	echo ""	
 
-	rpm -qa | grep $IGB_PKG &>/dev/null
-
-	if [ $? -ne 0 ]; then
-		echo -e "\e[1;32m[ovs-dpdk] ERROR: $IGB_PKG is not installed yet, starting to install \e[0m"	
-		echo ""
-		rpm -ivh $IGB_PKG 2>>/dev/null
-		if [ $? -ne 0 ]; then
-			echo -e "\e[1;32m[ovs-dpdk] ERROR: $IGB_PKG is installation failed \e[0m"	
-			echo ""
-			exit -1
-		else
-			echo -e "\e[1;32m[ovs-dpdk] $IGB_PKG is already installed \e[0m"	
-			echo ""
-		fi
-	else
-		echo -e "\e[1;32m[ovs-dpdk] $IGB_PKG is already installed \e[0m"	
-		echo ""
-	fi
-
 	rpm -qa | grep $I40E_PKG &>/dev/null
 
 	if [ $? -ne 0 ]; then
@@ -168,11 +149,17 @@ toolsCheck()
 sriovCheck()
 {
 	device=$INTERFACE
+
+	dev_num=`cat /sys/class/net/$device/device/sriov_numvfs`
+	if [ $dev_num -eq 2 ] ; then
+		echo -e "\e[1;32m[ovs-dpdk] NIC num is already expected \e[0m"
+		echo ""	
+		return 1
+	fi
+
 	if [[ $device ]];then
-		dev_num=`cat /sys/class/net/$device/device/sriov_numvfs`
 		lspci | grep 'Virtual Function' > /dev/null
 		if [ $? -ne 0 ] ; then
-
 			echo $SRIOV_NUM > /sys/class/net/$device/device/sriov_numvfs
 			for ((var = 0; var < $SRIOV_NUM; var++))
 			do
@@ -186,62 +173,46 @@ sriovCheck()
 	fi
 }
 
-uioCheck()
+vfioCheck()
 {
-	if [ ! -f /lib/modules/`uname -r`/kernel/net/igb-uio/igb_uio.ko ];then
-		echo -e "\e[1;31m[ovs-dpdk] ERROR: Target does not have the DPDK UIO Kernel Module. \e[0m"
-		echo -e "\e[1;31m[ovs-dpdk] 	To fix, please try to yum install from didirepo.\e[0m"
-		exit -1
-	fi
-
-	$sbindir/lsmod | grep -s uio > /dev/null
-	if [ $? -ne 0 ] ; then
-		modinfo uio > /dev/null
-		if [ $? -eq 0 ]; then
-			echo -e "\e[1;31m[ovs-dpdk] Loading uio module \e[0m"
-			echo ""
-			sudo $sbindir/modprobe uio
-		fi
-	fi
-
-	echo -e "\e[1;32m[ovs-dpdk] Loading DPDK UIO module \e[0m"
-	echo ""
-	sudo $sbindir/modprobe igb_uio
-	if [ $? -ne 0 ] ; then
-		echo -e "\e[1;31m[ovs-dpdk] ERROR: Could not load kernel/net/igb-uio/igb_uio.ko. \e[0m"
-		exit -1
-	fi
-
-	echo -e "\e[1;32m[ovs-dpdk] Loaded kernel/net/igb-uio/igb_uio.ko. \e[0m"
-	echo ""
-}
-
-bindCheck()
-{
-	$sbindir/dpdk-devbind --status | grep "drv=igb_uio" > /dev/null
+	$sbindir/dpdk-devbind --status | grep "drv=vfio-pci" > /dev/null
 	if [ $? -eq 0 ] ; then
-		local pci=`dpdk-devbind --status | grep "drv=igb_uio" | awk -F' ' '{print $1}'`
-		echo -e "\e[1;32m[ovs-dpdk] IGB_UIO module bond VF port $pci success \e[0m"
+		echo -e "\e[1;32m[ovs-dpdk] VFIO module bond VF port success \e[0m"
 		return 1
 	fi
 
-	vf_pci1=`lspci |grep $NIC_TYPE |grep  Virtual | gawk '{print $1}' | sed -n '1p'`
-	vf_pci2=`lspci |grep $NIC_TYPE |grep  Virtual | gawk '{print $1}' | sed -n '2p'`
-	if [[ $vf_pci1 && $vf_pci1 ]];then
-		$sbindir/dpdk-devbind --bind=igb_uio $vf_pci1
+	modprobe vfio-pci
+
+	/sbin/lsmod | grep -s vfio_pci > /dev/null
+	if [ $? -ne 0 ] ; then
+		echo -e "\e[1;31m[ovs-dpdk] VFIO module modprobe failed \e[0m"
+		echo ""	
+		exit -1
 	else
-		echo -e "\e[1;31m[ovs-dpdk] ERROR: VF Port num is not expected \e[0m"
+		echo -e "\e[1;32m[ovs-dpdk] VFIO module modprobe success \e[0m"
+		echo ""	
+	fi
+
+	/usr/bin/chmod a+x /dev/vfio
+	/usr/bin/chmod 0666 /dev/vfio/*
+
+	vf_pci1=`lspci | grep $NIC_TYPE | grep	Virtual | gawk '{print $1}' | sed -n '1p'`
+	vf_pci2=`lspci | grep $NIC_TYPE | grep	Virtual | gawk '{print $1}' | sed -n '2p'`
+	if [[ $vf_pci1 && $vf_pci2 ]];then
+		$sbindir/dpdk-devbind --bind=vfio-pci $vf_pci1
+	else
+		echo -e "\e[1;31m[ovs-dpdk] VF Port num is not expected \e[0m"
 		echo ""	
 		exit -1
 	fi
 
-	$sbindir/dpdk-devbind --status | grep "drv=igb_uio" > /dev/null
+	$sbindir/dpdk-devbind --status | grep "drv=vfio-pci" > /dev/null
 	if [ $? -ne 0 ] ; then
-		echo -e "\e[1;31m[ovs-dpdk] ERROR: IGB_UIO module bonding VF port failed \e[0m"
+		echo -e "\e[1;31m[ovs-dpdk] VFIO module bond VF port failed \e[0m"
 		echo ""	
 		exit -1
 	else
-		echo -e "\e[1;32m[ovs-dpdk] IGB_UIO module bonding VF port success \e[0m"
+		echo -e "\e[1;32m[ovs-dpdk] VFIO module bond VF port success \e[0m"
 		echo ""	
 	fi
 }
@@ -263,12 +234,12 @@ fi
 osCheck
 pkgCheck
 numaCheck
+iommuCheck
 threadCheck
 hugepageCheck
 toolsCheck
 sriovCheck
-uioCheck
-bindCheck
+vfioCheck
 
 echo
 echo '===== END ====='

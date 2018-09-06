@@ -42,7 +42,7 @@ bind2dpdk()
 		exit -1
 	fi
 
-	dpdk-devbind --bind=igb_uio $vf_pci
+	dpdk-devbind --bind=vfio-pci $vf_pci
 	if [ $? != 0 ];then
 		write_log "[ovs-dpdk] bind2dpdk:ERROR bind '$vf_pci' failed"
 		exit -1
@@ -61,10 +61,24 @@ bind_dpdk_port()
 			exit -1
 		fi
 
-		dpdk-devbind --status | grep "drv=igb_uio" > /dev/null
+		modprobe vfio-pci 
+
+		/sbin/lsmod | grep -s vfio_pci > /dev/null
+		if [ $? -ne 0 ] ; then
+			write_log "[ovs-dpdk] VFIO module modprobe failed"
+			exit -1
+		else
+			write_log "[ovs-dpdk] VFIO module modprobe success "
+			echo ""	
+		fi
+
+		/usr/bin/chmod a+x /dev/vfio
+		/usr/bin/chmod 0666 /dev/vfio/*
+
+		dpdk-devbind --status | grep "drv=vfio-pci" > /dev/null
 		if [ $? -eq 0 ] ; then
-			local pci=`dpdk-devbind --status | grep "drv=igb_uio" | awk -F' ' '{print $1}'`
-			write_log "[ovs-dpdk] SUCCESS bind VF port '$pci' to igb_uio"
+			local pci=`dpdk-devbind --status | grep "drv=vfio-pci" | awk -F' ' '{print $1}'`
+			write_log "[ovs-dpdk] SUCCESS bind VF port '$pci' to vfio-pci"
 			return 1
 		fi
 
