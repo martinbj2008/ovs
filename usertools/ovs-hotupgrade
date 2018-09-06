@@ -221,15 +221,15 @@ function sys_env_check(){
         return 1
     fi
     
-    bind_vf=`dpdk-devbind -s | grep "XL710/X710 Virtual Function" |grep drv=igb_uio | grep "${curr_vf1}" |gawk '{print $1}'`
+    bind_vf=`dpdk-devbind -s | grep "Virtual Function" |grep drv=vfio-pci | grep "${curr_vf1}" |gawk '{print $1}'`
     if [ -z "$bind_vf" ];then
-        log_echo "Vf pci $bind_vf should bind by igb_uio"
+        log_echo "Vf pci $bind_vf should bind by vfio-pci"
         return 1
     fi
     
-    unbind_vf=`dpdk-devbind -s |grep "XL710/X710 Virtual Function" | grep drv=igb_uio |grep "${next_vf1}"|gawk '{print $1}'`
+    unbind_vf=`dpdk-devbind -s |grep "Virtual Function" | grep drv=vfio-pci |grep "${next_vf1}"|gawk '{print $1}'`
     if [ -n "$unbind_vf" ];then
-        log_echo "Vf pci $unbind_vf cannot bind by igb_uio"
+        log_echo "Vf pci $unbind_vf cannot bind by vfio-pci"
         return 1
     fi
     
@@ -246,7 +246,7 @@ function sys_env_check(){
     fi
     
     free_huge=`cat /sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages`
-    if [ $free_huge -le 1024 ];then
+    if [ $free_huge -lt 1024 ];then
         log_echo "No enough free hugepage is system, ovs new process need 1024, the free is $free_huge"
         return 1
     fi
@@ -305,7 +305,7 @@ function prepare_upgrade(){
     [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-server/reconnect error" && return 1
     log "The ovs-vswitchd ${curr_ovs_pid} has disconnect the ovsdb"
     
-    dpdk-devbind -b igb_uio 0000:$next_vf1 >> /dev/null
+    dpdk-devbind -b vfio-pci 0000:$next_vf1 >> /dev/null
     ovs-vsctl --no-wait set interface dpdk1 options:dpdk-devargs=0000:$next_vf1
     [ $? -ne 0 ] && log_echo "set $pid dpdk-devargs=0000:$next_vf1 error" && return 1
     #ovs-vsctl --no-wait set interface dpdk2 options:dpdk-devargs=0000:$next_vf2
@@ -384,9 +384,9 @@ function upgrade_vhost_user(){
     
     if [ $next_ovs_pid -eq 0 ];then
         ovs-vswitchd --pidfile=$next_pid --log-file=$next_log --monitor --detach -vconsole:emer -vsyslog:err -vfile:info --mlockall --no-chdir >> /dev/null
-        tnl_set_arp $br_name $interface
-        log "tnl_set_arp has been execute"
-        next_ovs_pid=`cat $next_pid`  
+        next_ovs_pid=`cat $next_pid`
+        [ $next_ovs_pid -eq 0 ] && log_echo "New ovs-vswithd process start error" && return 1
+
         log_echo "New ovs-vswithd process $next_ovs_pid has been start up"
         ovs-vsctl --no-wait set bridge ${br_name} other_config:datapath-id=$next_dpid
         [ $? -ne 0 ] && log_echo "set bridge datapath-id=$next_dpid error" && return 1
@@ -423,19 +423,23 @@ function upgrade_over(){
     ipam_unlock
     [ $? -ne 0 ] && return 1
     
+    rm -fr /dev/hugepages/${curr_prefix}*
     log "Ovs hot upgrade process has finished"
+    
     env_init
     curr_stage="prepare"
 }
 
 # Reset the configuration to the status before upgrade
 function reset_env(){
-    ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${next_ovs_pid}.ctl  ovsdb-tool/auto-reconnect false >> /dev/null
-    [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-tool/auto-reconnect true error" && return 1
-    
-    ovs-appctl -t ovsdb-server ovsdb-server/reconnect
-    [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-server/reconnect error" && return 1
-    log "The ovs-vswitchd ${curr_ovs_pid} has disconnect the ovsdb"
+    if [ $next_ovs_pid -ne 0 ];then  
+        ovs-appctl  -t /usr/local/var/run/openvswitch/ovs-vswitchd.${next_ovs_pid}.ctl  ovsdb-tool/auto-reconnect false >> /dev/null
+        [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-tool/auto-reconnect true error" && return 1
+
+        ovs-appctl -t ovsdb-server ovsdb-server/reconnect
+        [ $? -ne 0 ] && log_echo "set $curr_ovs_pid ovsdb-server/reconnect error" && return 1
+        log "The ovs-vswitchd ${curr_ovs_pid} has disconnect the ovsdb"
+    fi
     
     ovs-vsctl --no-wait  set interface dpdk1 options:dpdk-devargs=0000:$curr_vf1
     [ $? -ne 0 ] && log_echo "reset_env" "set $curr_ovs_pid dpdk-devargs=0000:$curr_vf1 error" && return 1
@@ -452,11 +456,12 @@ function reset_env(){
         [ $? -ne 0 ] && log_echo "ovs-vswitchd $next_ovs_pid exit error" && return 1
         log "ovs-vswitchd $next_ovs_pid has exit"
         next_ovs_pid=0
+        rm -fr /dev/hugepages/${next_prefix}*
         sleep 1    
     fi
     
     dpdk-devbind -u 0000:$next_vf1 >> /dev/null
-    dpdk-devbind -b igb_uio 0000:$curr_vf1 >> /dev/null
+    dpdk-devbind -b vfio-pci 0000:$curr_vf1 >> /dev/null
     
     ovs-vsctl --no-wait set bridge ${br_name} other_config:datapath-id=$curr_dpid
     [ $? -ne 0 ] && log_echo "set bridge datapath-id=$curr_dpid error" && return 1
