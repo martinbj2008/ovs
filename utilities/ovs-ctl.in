@@ -153,6 +153,10 @@ set_dpdk_configs () {
             action "Configuring open vSwitch dpdk vhostuser reconnect" \
                 ovs_vsctl set Open_vSwitch . other_config:vhostuser-no-autoconnect=$VHOSTUSER_NO_AUTO_RECONNECT
         fi
+        if test x"$OVS_MODE" != x; then
+            action "Configuring open vSwitch dpdk extra" \
+                ovs_vsctl set Open_vSwitch . other_config:dpdk-extra="--file-prefix ovs-$OVS_MODE"
+        fi
     fi
 }
 
