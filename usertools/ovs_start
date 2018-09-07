@@ -74,8 +74,6 @@ fi
 
 $scriptdir/ovs-ctl --system-id=random start
 
-$bindir/tnl_set_arp br-dpdk
-sleep 5
 supervisorctl update
 
 echo
