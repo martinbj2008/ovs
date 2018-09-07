@@ -19,4 +19,5 @@ EXTRA_DIST += \
 		usertools/ovs_restart  \
 		usertools/tnl_set_arp  \
 		usertools/tnl_set_arp.conf \
-		usertools/dpdk-pdump 
+		usertools/dpdk-pdump \
+		usertools/ovs-cmd
