@@ -1,9 +1,9 @@
 #!/bin/sh
 active_pid="/usr/local/var/run/openvswitch/ovs-vswitchd-active.pid"
-active_log="/usr/local/var/log/openvswitch/ovs-vswitchd-active.log"
+active_log="/var/log/openvswitch/ovs-vswitchd-active.log"
 
 backup_pid="/usr/local/var/run/openvswitch/ovs-vswitchd-backup.pid"
-backup_log="/usr/local/var/log/openvswitch/ovs-vswitchd-backup.log"
+backup_log="/var/log/openvswitch/ovs-vswitchd-backup.log"
 
 br_name="br-dpdk"
 ovs_conf="/etc/openvswitch/ovs-dpdk.conf"
