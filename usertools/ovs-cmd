@@ -1,0 +1,104 @@
+#!/usr/bin/sh
+
+function exe_cmd(){
+    __cmd=$1
+    __pid=$2
+    __para1=$3
+    __para2=$4
+    __para3=$5
+    __para4=$6
+    __para5=$7
+    __para6=$8
+    __para7=$9
+    __para8=${10}
+    __para9=${11}
+    case $__cmd in
+        "show-sg")
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${__pid}.ctl sg/rule/show $__para1 
+            ;;
+        "add-sg")
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${__pid}.ctl sg/rule/add $__para1 $__para2 $__para3 $__para4 $__para5 $__para6 $__para7 $__para8 $__para9
+            ;;
+        "del-sg")
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${__pid}.ctl sg/rule/del $__para1 $__para2 $__para3 $__para4 $__para5 $__para6 $__para7 $__para8 $__para9
+            ;;
+        "dump-flow")
+            ovs-ofctl -O Openflow13 dump-flows /usr/local/var/run/openvswitch/br-dpdk.${__pid}.mgmt
+            ;;
+        "show-dpif")
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${__pid}.ctl dpif/show
+            ;;
+        "show-arp")
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${__pid}.ctl tnl/arp/show
+            ;;
+        "show-route")
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${__pid}.ctl ovs/route/show
+            ;;
+        "list-cmd")
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${__pid}.ctl list-commands
+            ;;
+        "add-flow")
+            ovs-ofctl -O Openflow13 add-flow /usr/local/var/run/openvswitch/br-dpdk.${__pid}.mgmt $__para1
+            ;;
+        "del-flow")
+            ovs-ofctl -O Openflow13 del-flows /usr/local/var/run/openvswitch/br-dpdk.${__pid}.mgmt $__para1
+            ;;
+        "trace")
+            ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${__pid}.ctl ofproto/trace $br_name $__para1 $__para2 $__para3 $__para4 $__para5 $__para6 $__para7 $__para8 $__para9
+            ;;
+        "app-cmd")
+	    ovs-appctl -t /usr/local/var/run/openvswitch/ovs-vswitchd.${__pid}.ctl $__para1 $__para2 $__para3 $__para4 $__para5 $__para6 $__para7 $__para8 $__para9
+            ;;
+        *)
+	    echo "Uknown CMD $__cmd"
+        echo "Try \"ovs-cmd help\""
+            exit
+            ;;
+    esac
+}
+
+function usage(){
+    echo "show-sg                    Display sg rule"
+    echo "add-sg                     Add sg rule"
+    echo "del-sg                     Del sg rule"
+    echo "show-dpif                  Display dpif configuration"
+    echo "show-arp                   Display vxlan tnl arp configuration"
+    echo "show-route                 Display route configuration"
+    echo "list-cmd                   Display vswitchd appctl cmds"
+    echo "dump-flow                  Display Openflow flows"
+    echo "add-flow                   Add Openflow flows"
+    echo "del-flow                   Del Openflow flows"
+    echo "trace                      Appctl trace tool"
+    echo "app-cmd                    Execute vswitchd appctl cmd"
+}
+
+br_name="br-dpdk"
+cmd=$1
+para1=$2
+para2=$3
+para3=$4
+para4=$5
+para5=$6
+para6=$7
+para7=$8
+para8=$9
+para9=${10}
+
+if [ "$cmd" == "help" ];then
+    usage
+    exit
+fi
+
+pid_cnt=`ps -ax|grep ovs-vswitchd|grep -v monitoring| grep -v grep|gawk '{print $1}'|wc -l`
+j=1
+while [ $j -le $pid_cnt ];
+do
+
+    pid=`ps -ax|grep ovs-vswitchd|grep -v monitoring| grep -v grep|gawk '{print $1}'|sed -n "${j}p"`
+    echo "--------------------------------------ovs pid $pid $cmd conf--------------------------------------------"
+
+    exe_cmd $cmd $pid $para1 $para2 $para3 $para4 $para5 $para6 $para7 $para8 $para9 
+
+    j=`expr $j + 1`
+done
+
