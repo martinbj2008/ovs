@@ -2,7 +2,7 @@
 # Tonghao Zhang <zhangtonghao@didichuxing.com>
 #
 
-dpdkport="dpdk1 dpdk2"
+dpdkport="dpdk1"
 log_file="/tmp/filter.log"
 
 ## ERROR CODE
