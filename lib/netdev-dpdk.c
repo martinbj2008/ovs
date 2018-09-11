@@ -2786,6 +2786,8 @@ netdev_dpdk_vhost_get_stats(const struct netdev *netdev,
     stats->tx_bytes = dev->stats.tx_bytes;
     stats->rx_errors = dev->stats.rx_errors;
     stats->rx_length_errors = dev->stats.rx_length_errors;
+    /* Unsupported Stats, temporarily set to zero to compatible with ovs-vsctl cmd */
+    stats->tx_errors = 0;
 
     stats->rx_1_to_64_packets = dev->stats.rx_1_to_64_packets;
     stats->rx_65_to_127_packets = dev->stats.rx_65_to_127_packets;
