@@ -242,7 +242,7 @@ AC_DEFUN([OVS_CHECK_DPDK], [
     esac
 
     DPDK_LIB="-ldpdk"
-    DPDK_EXTRA_LIB=""
+    DPDK_EXTRA_LIB="-lnuma"
 
     ovs_save_CFLAGS="$CFLAGS"
     ovs_save_LDFLAGS="$LDFLAGS"
