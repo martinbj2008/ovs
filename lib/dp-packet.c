@@ -22,6 +22,10 @@
 #include "netdev-dpdk.h"
 #include "openvswitch/dynamic-string.h"
 #include "util.h"
+#include "openvswitch/vlog.h"
+
+VLOG_DEFINE_THIS_MODULE(dp_packet);
+static struct vlog_rate_limit err_rl = VLOG_RATE_LIMIT_INIT(60, 5);
 
 static void
 dp_packet_init__(struct dp_packet *b, size_t allocated, enum dp_packet_source source)
@@ -403,6 +407,10 @@ dp_packet_reserve_with_tailroom(struct dp_packet *b, size_t headroom,
 void *
 dp_packet_push_uninit(struct dp_packet *b, size_t size)
 {
+    if(b->source == DPBUF_DPDK && size > dp_packet_headroom(b)){
+        VLOG_ERR("Headroom size %u, base %p, dp_packet %p", dp_packet_headroom(b), dp_packet_base(b), b);
+        return NULL;
+    }
     dp_packet_prealloc_headroom(b, size);
     dp_packet_set_data(b, (char*)dp_packet_data(b) - size);
     dp_packet_set_size(b, dp_packet_size(b) + size);

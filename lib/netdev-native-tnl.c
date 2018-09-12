@@ -156,6 +156,9 @@ netdev_tnl_push_ip_header(struct dp_packet *packet,
     struct ovs_16aligned_ip6_hdr *ip6;
 
     eth = dp_packet_push_uninit(packet, size);
+    if(eth == NULL){
+        return NULL;
+    }
     *ip_tot_size = dp_packet_size(packet) - sizeof (struct eth_header);
 
     memcpy(eth, header, size);
@@ -226,6 +229,9 @@ netdev_tnl_push_udp_header(struct dp_packet *packet,
     int ip_tot_size;
 
     udp = netdev_tnl_push_ip_header(packet, data->header, data->header_len, &ip_tot_size);
+    if(udp == NULL){
+        return;
+    }
 
     /* set udp src port */
     udp->udp_src = netdev_tnl_get_src_port(packet);
