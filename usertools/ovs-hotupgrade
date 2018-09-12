@@ -424,6 +424,7 @@ function upgrade_over(){
     [ $? -ne 0 ] && return 1
     
     rm -fr /dev/hugepages/${curr_prefix}*
+    rm -f $curr_ovs_pid
     log "Ovs hot upgrade process has finished"
     
     env_init
@@ -457,6 +458,7 @@ function reset_env(){
         log "ovs-vswitchd $next_ovs_pid has exit"
         next_ovs_pid=0
         rm -fr /dev/hugepages/${next_prefix}*
+        rm -f $next_ovs_pid
         sleep 1    
     fi
     
