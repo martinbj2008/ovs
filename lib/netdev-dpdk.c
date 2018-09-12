@@ -2163,6 +2163,11 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
         protocol = IPPROTO_ICMP;
         minp = NULL;
         maxp = NULL;
+    }else if(strcmp(proto, "udp") == 0){
+        unixctl_command_reply(conn, "Invaild proto\n");
+        VLOG_WARN("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild proto", 
+            vhost, mac, proto, ipmask, minp, maxp);
+        return; 
     }else{
         unixctl_command_reply(conn, "Invaild proto\n");
         VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild proto", 
@@ -2224,7 +2229,7 @@ static void netdev_dpdk_sg_add(struct unixctl_conn *conn, int argc OVS_UNUSED,
             ret = sg_rule_insert(&dev->sg_list_table, mac, protocol, min_port,max_port, in.s_addr, mask_t);
             if(ret == -1){
                 unixctl_command_reply(conn, "Exist Rule\n");
-                VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Exist Rule", 
+                VLOG_WARN("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Exist Rule", 
                     vhost, mac, proto, ipmask, minp, maxp);
             }else if(ret == -2){
                 unixctl_command_reply(conn, "Cannot add more than 1000 rules\n");
@@ -2276,6 +2281,11 @@ static void netdev_dpdk_sg_del(struct unixctl_conn *conn, int argc OVS_UNUSED,
         protocol = IPPROTO_ICMP;
         minp = NULL;
         maxp = NULL;
+    }else if(strcmp(proto, "udp") == 0){
+        unixctl_command_reply(conn, "Invaild proto\n");
+        VLOG_WARN("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild proto", 
+            vhost, mac, proto, ipmask, minp, maxp);
+        return; 
     }else{
         unixctl_command_reply(conn, "Invaild proto\n");
         VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Invaild proto.", 
@@ -2342,7 +2352,7 @@ static void netdev_dpdk_sg_del(struct unixctl_conn *conn, int argc OVS_UNUSED,
                     vhost, mac, proto, ipmask, minp, maxp);
             }else{
                 unixctl_command_reply(conn, "OK\n");
-                VLOG_ERR("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Del OK.", 
+                VLOG_INFO("vhost:[%s], mac:[%s], proto:[%s], ipmask:[%s], minport:[%s], maxport:[%s], Del OK.", 
                     vhost, mac, proto, ipmask, minp, maxp);
             }
           ovs_mutex_unlock(&dev->mutex);
