@@ -532,7 +532,7 @@ ovs_set_program_name(const char *argv0, const char *version)
 
     free(program_version);
     if (!strcmp(version, VERSION)) {
-        program_version = xasprintf("%s (Open vSwitch) "VERSION"--18.09.3\n",
+        program_version = xasprintf("%s (Open vSwitch) "VERSION"--18.09.4\n",
                                     program_name);
     } else {
         program_version = xasprintf("%s %s\n"
