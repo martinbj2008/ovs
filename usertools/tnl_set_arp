@@ -1,10 +1,23 @@
 #!/bin/sh
 
 log_file="/tmp/tnl_set_arp_log"
+log_other="/tmp/tnl_set_arp_log.other"
+max_log_size=1073741824
 
 function log(){
     date=`date +"%Y-%m-%d--%H:%m:%S"`
     echo "${date} --- $1" >> $log_file
+}
+
+function check_log(){
+    size=`ls -l /tmp/tnl_set_arp_log |gawk '{print $5}'`
+
+    if [ $size -gt $max_log_size ];then
+        if [ -f $log_other ];then
+            rm -f $log_other
+        fi
+        mv $log_file $log_other
+    fi
 }
 
 function iptohex() {
@@ -96,6 +109,7 @@ fi
 #main
 while [ 1 ];
 do
+    check_log
     sendarp $dev
     sleep 1
     confarp $br $dev
