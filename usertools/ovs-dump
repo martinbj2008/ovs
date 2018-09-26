@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# Capture dpdk port packet via dpdk-pdump
+
+DPDK_NAME=
+DUMP_FLAG=
+
+function start_capture()
+{
+	local pid=`pidof dpdk-pdump`
+	if [ $? != 0 ] ; then
+	    echo -e "\e[1;31mdpdk-dump is already running\e[0m"
+		exit 1;
+	fi
+
+	local pci=`ovs-vsctl get interface $DPDK_NAME options:dpdk-devargs`
+	if [ -z "$pci" ];then
+	    echo -e "\e[1;31mdpdk-dump start failed\e[0m"
+		exit 1;
+	fi
+
+	/usr/bin/dpdk-pdump -- --pdump device_id=0000:84:02.0,queue=*,rx-dev=lo,tx-dev=lo --server-socket-path=/usr/local/var/run/openvswitch &
+	if [ $? != 0 ] ; then
+	    echo -e "\e[1;31mdpdk-dump start failed\e[0m"
+		exit 1;
+	fi
+
+	echo "dpdk-dump `pidof dpdk-pdump` started : $DPDK_NAME mirror to loopback interface : tcpdump -i lo" 
+}
+
+function stop_capture()
+{
+	local pid1=`pidof dpdk-pdump`
+	if [ -z "$pid1" ] ; then
+	    echo -e "\e[1;31mdpdk-dump already stoped\e[0m"
+		exit 1;
+	fi
+
+	kill -s SIGINT $pid1 && sleep 0.5
+
+	local pid2=`pidof dpdk-pdump`
+	if [ -z "$pid2" ] ; then
+		echo "dpdk-dump stoped" 
+		exit 1;
+	else
+	    echo -e "\e[1;31mdpdk-dump stoped failed\e[0m"
+	fi
+}
+
+if [ $# != 2 ] ; then 
+	echo -e "\e[1;32mUSAGE: $0 DPDK_PORT_NAME [start/stop]\e[0m"
+	echo -e "\e[1;32me.g.: $0 dpdk1 start\e[0m"
+	exit 1;
+fi
+
+DPDK_NAME=$1
+DUMP_FLAG=$2
+
+ovs-vsctl show | grep $DPDK_NAME >/dev/null 2>&1
+if [ $? != 0 ] ; then
+	echo -e "\e[1;31m$DPDK_NAME is illegal\e[0m"
+	exit 1;
+fi
+
+if [ "$DUMP_FLAG" == start ] ; then
+    start_capture
+elif [ "$DUMP_FLAG" == stop ] ; then
+    stop_capture
+else
+    echo -e "\e[1;31mUnknown Command [start/stop]\e[0m"
+fi
