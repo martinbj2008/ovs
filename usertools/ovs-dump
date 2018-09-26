@@ -13,13 +13,13 @@ function start_capture()
 		exit 1;
 	fi
 
-	local pci=`ovs-vsctl get interface $DPDK_NAME options:dpdk-devargs`
+	local pci=`dpdk-devbind --status | grep "drv=vfio-pci" | gawk '{print $1}' | sed -n '1p'`
 	if [ -z "$pci" ];then
 	    echo -e "\e[1;31mdpdk-dump start failed\e[0m"
 		exit 1;
 	fi
 
-	/usr/bin/dpdk-pdump -- --pdump device_id=0000:84:02.0,queue=*,rx-dev=lo,tx-dev=lo --server-socket-path=/usr/local/var/run/openvswitch &
+	/usr/bin/dpdk-pdump -- --pdump device_id=$pci,queue=*,rx-dev=lo,tx-dev=lo --server-socket-path=/usr/local/var/run/openvswitch &
 	if [ $? != 0 ] ; then
 	    echo -e "\e[1;31mdpdk-dump start failed\e[0m"
 		exit 1;
