@@ -157,6 +157,14 @@ set_dpdk_configs () {
             action "Configuring open vSwitch dpdk extra" \
                 ovs_vsctl set Open_vSwitch . other_config:dpdk-extra="--file-prefix ovs-$OVS_MODE"
         fi
+        if test x"$NUM_HANDLER" != x; then
+            action "Configuring open vSwitch n-handler-threads" \
+                ovs_vsctl set Open_vSwitch . other_config:n-handler-threads=$NUM_HANDLER
+        fi
+        if test x"$NUM_REVALIDATOR" != x; then
+            action "Configuring open vSwitch n-revalidator-threads" \
+                ovs_vsctl set Open_vSwitch . other_config:n-revalidator-threads=$NUM_REVALIDATOR
+        fi
     fi
 }
 
