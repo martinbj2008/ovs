@@ -320,7 +320,7 @@ function prepare_upgrade(){
     ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-extra="--file-prefix $next_prefix"
     log "set --file-prefix $next_prefix"
     
-    sed -ie 's/OVS_MODE=\"$curr_mode\"/OVS_MODE=\"$next_mode\"/g' $ovs_conf
+    sed -ie "s/OVS_MODE=\"$curr_mode\"/OVS_MODE=\"$next_mode\"/g" $ovs_conf
     log "The $ovs_conf OVS_MODE has been change from $curr_mode to $next_mode"
     
     add_veth_bak
@@ -471,7 +471,7 @@ function reset_env(){
     
     ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-extra="--file-prefix $curr_prefix"
     mode_str=`grep OVS_MODE $ovs_conf`
-    sed -ie 's/${mode_str}/OVS_MODE=\"$curr_mode\"/g' $ovs_conf
+    sed -ie "s/${mode_str}/OVS_MODE=\"$curr_mode\"/g" $ovs_conf
     log "ovs-prefix has been set to active"
     
     delete_veth_bak
