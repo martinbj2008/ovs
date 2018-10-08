@@ -92,7 +92,11 @@ netdev_tnl_ip_extract_tnl_md(struct dp_packet *packet, struct flow_tnl *tnl,
 
         if (OVS_UNLIKELY(!dp_packet_ip_checksum_valid(packet))) {
             if (csum(ip, IP_IHL(ip->ip_ihl_ver) * 4)) {
-                VLOG_WARN_RL(&err_rl, "ip packet has invalid checksum");
+                VLOG_WARN_RL(&err_rl, "ip packet has invalid checksum.(header: ihl_ver:%u, tos:%u, tot_len:%u, id:%u, frag_off:%u, ttl:%u, proto:%u, csum:%u, src:%u, dst:%u)",
+					ip->ip_ihl_ver, ip->ip_tos, ip->ip_tot_len, ip->ip_id, ip->ip_frag_off,
+					ip->ip_ttl, ip->ip_proto, ip->ip_csum,
+					get_16aligned_be32(&ip->ip_src),
+					get_16aligned_be32(&ip->ip_dst));
                 return NULL;
             }
         }
