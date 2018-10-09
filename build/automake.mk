@@ -8,5 +8,5 @@
 EXTRA_DIST += \
 	build/automake.mk \
         build/ovs-build \
-        build/before-install.sh  \
-        build/after-install.sh  
+        build/before_install.sh  \
+        build/after_install.sh  

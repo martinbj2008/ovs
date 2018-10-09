@@ -8,6 +8,10 @@ __cmd=$1
 version=$2
 iteration=$3
 
+if [ "$__cmd" = "" ];then
+    __cmd="nodebug-build"
+fi
+
 function mkrpm(){
     cd ./build/
     rm -fr ./rpm
@@ -46,6 +50,8 @@ function mkrpm(){
     fpm -s dir -t rpm -n openvswitch-2.9.0 -v $version --iteration $iteration --pre-install=./before_install.sh --post-install=./after_install.sh --prefix=/ -C ./rpm
 }
 
+./boot.sh
+
 case $__cmd in
     "debug-build")
         make distclean
@@ -73,8 +79,8 @@ case $__cmd in
         mkrpm    
         ;;
     "debug-rpm")
-        if [ "$version" = "" ] || [ $iteration = "" ];then
-                echo "usage: $0 nodebug-rpm version iteration"
+        if [ "$version" = "" ] || [ "$iteration" = "" ];then
+                echo "usage: $0 debug-rpm version iteration"
                 exit
         fi
         

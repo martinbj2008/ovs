@@ -466,3 +466,4 @@ include ovn/automake.mk
 include selinux/automake.mk
 include build-aux/automake.mk
 include usertools/automake.mk
+include build/automake.mk
