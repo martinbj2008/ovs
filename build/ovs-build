@@ -1,0 +1,99 @@
+#!/bin/sh
+if [ "$DPDK_BUILD" = "" ];then
+    echo "Please set DPDK_BUILD ENV"
+    exit
+fi
+
+__cmd=$1
+version=$2
+iteration=$3
+
+function mkrpm(){
+    cd ./build/
+    rm -fr ./rpm
+    mkdir -p './rpm/usr/bin'
+    mkdir -p './rpm/usr/sbin'
+    mkdir -p './rpm/usr/local/share/man'
+    mkdir -p './rpm/etc/openvswitch'
+    mkdir -p './rpm/etc/supervisord.d/deploy'
+    mkdir -p './rpm/usr/local/share/man/man1'
+    mkdir -p './rpm/usr/local/share/man/man5'
+    mkdir -p './rpm/usr/local/share/man/man7'
+    mkdir -p './rpm/usr/local/share/man/man8'
+    mkdir -p './rpm/tmp'
+    
+    cd ..
+    
+    cp ../usertools/ovs-dpdk.conf ./rpm/etc/openvswitch
+    cp ../usertools/tnl_set_arp.conf ./rpm/etc/supervisord.d/deploy
+    /usr/bin/install -c utilities/ovs-appctl utilities/ovs-dpctl utilities/ovs-ofctl utilities/ovs-vsctl ovsdb/ovsdb-tool ovsdb/ovsdb-client vtep/vtep-ctl './build/rpm/usr/bin'
+    /usr/bin/install -c ovsdb/ovsdb-server vswitchd/ovs-vswitchd './build/rpm/usr/sbin'
+    /usr/bin/install -c usertools/didicloud_filter usertools/ovs-hotupgrade usertools/recover usertools/ovs_pre_check usertools/ovs_start usertools/ovs_post_check usertools/ovs_stop usertools/ovs_restart usertools/tnl_set_arp usertools/ovs-dump usertools/dpdk-pdump usertools/ovs-cmd './build/rpm/usr/bin'
+    
+    /usr/bin/install -c -m 644 vswitchd/ovs-vswitchd.conf.db.5 vtep/vtep.5 ovn/ovn-sb.5 ovn/ovn-nb.5 './build/usr/local/share/man/man5'
+    /usr/bin/install -c -m 644 lib/ovs-fields.7 ovn/ovn-architecture.7 './build/usr/local/share/man/man7'
+    /usr/bin/install -c -m 644 utilities/ovs-pcap.1 utilities/ovs-tcpundump.1 ovsdb/ovsdb-tool.1 ovsdb/ovsdb-client.1 ovsdb/ovsdb-server.1 ovn/utilities/ovn-detrace.1 './build/usr/local/share/man/man1'
+    
+    /usr/bin/install -c -m 644 utilities/ovs-appctl.8 utilities/ovs-ctl.8 utilities/ovs-testcontroller.8 utilities/ovs-dpctl.8 utilities/ovs-dpctl-top.8 utilities/ovs-l3ping.8 utilities/ovs-ofctl.8 utilities/ovs-parse-backtrace.8 utilities/ovs-pki.8 utilities/ovs-tcpdump.8 utilities/ovs-vlan-bug-workaround.8 utilities/ovs-vsctl.8 utilities/bugtool/ovs-bugtool.8 vswitchd/ovs-vswitchd.8 vtep/vtep-ctl.8 ovn/controller/ovn-controller.8 ovn/controller-vtep/ovn-controller-vtep.8 ovn/northd/ovn-northd.8 ovn/utilities/ovn-ctl.8 ovn/utilities/ovn-nbctl.8 ovn/utilities/ovn-sbctl.8 ovn/utilities/ovn-trace.8 './build/usr/local/share/man/man8'
+    
+    cp -r python './build/rpm/tmp/' 
+    
+    make install
+    cp -r /usr/local/share/openvswitch './build/rpm/usr/local/share'
+    
+    cd build
+    rm -f openvswitch-2.9.0-${version}-${iteration}.x86_64.rpm
+    fpm -s dir -t rpm -n openvswitch-2.9.0 -v $version --iteration $iteration --pre-install=./before_install.sh --post-install=./after_install.sh --prefix=/ -C ./rpm
+}
+
+case $__cmd in
+    "debug-build")
+        make distclean
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O0' --bindir=/usr/bin --sbindir=/usr/sbin    --datarootdir=/usr/local/share
+        sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
+        make -j20
+        ;;
+    "nodebug-build")
+        make distclean
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-O2' --bindir=/usr/bin --sbindir=/usr/sbin    --datarootdir=/usr/local/share
+        sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
+        make -j20
+        ;;
+    "nodebug-rpm")
+        if [ "$version" = "" ] || [ $iteration = "" ];then
+                echo "usage: $0 nodebug-rpm version iteration"
+                exit
+        fi
+        
+        make distclean
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O0' --bindir=/usr/bin --sbindir=/usr/sbin    --datarootdir=/usr/local/share
+        sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
+        make -j20
+        
+        mkrpm    
+        ;;
+    "debug-rpm")
+        if [ "$version" = "" ] || [ $iteration = "" ];then
+                echo "usage: $0 nodebug-rpm version iteration"
+                exit
+        fi
+        
+        make distclean
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-O2' --bindir=/usr/bin --sbindir=/usr/sbin    --datarootdir=/usr/local/share
+        sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
+        make -j20
+
+        mkrpm
+        ;;
+    *)
+    echo "Uknown CMD $__cmd"
+        exit
+        ;;
+esac
+
+
+
+
+
+
+
