@@ -14,7 +14,7 @@ interface=""
 interval=0
 
 date=`date +"%Y-%m-%d--%H:%m:%S"`
-log_file="/usr/local/var/log/openvswitch/ovs-hotupgrade-${date}.log"
+log_file="/var/log/openvswitch/ovs-hotupgrade-${date}.log"
 pid_file="/var/run/ovs-hotup.pid"
 
 #Stress test status
