@@ -55,13 +55,13 @@ function mkrpm(){
 case $__cmd in
     "debug-build")
         make distclean
-        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O0' --bindir=/usr/bin --sbindir=/usr/sbin    --datarootdir=/usr/local/share
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O0' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
         sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
         make -j20
         ;;
     "nodebug-build")
         make distclean
-        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-O2' --bindir=/usr/bin --sbindir=/usr/sbin    --datarootdir=/usr/local/share
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-O2' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
         sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
         make -j20
         ;;
@@ -72,7 +72,7 @@ case $__cmd in
         fi
         
         make distclean
-        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O0' --bindir=/usr/bin --sbindir=/usr/sbin    --datarootdir=/usr/local/share
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O0' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
         sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
         make -j20
         
@@ -85,7 +85,7 @@ case $__cmd in
         fi
         
         make distclean
-        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-O2' --bindir=/usr/bin --sbindir=/usr/sbin    --datarootdir=/usr/local/share
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-O2' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
         sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
         make -j20
 
