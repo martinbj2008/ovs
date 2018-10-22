@@ -1916,7 +1916,7 @@ netdev_dpdk_vhost_rxq_recv(struct netdev_rxq *rxq,
     dp_packet_batch_init_packet_fields(batch);
 
     /* slb-rs hook before packet revc from vm */
-    netdev_dpdk_slb_rs_out(batch->packets, nb_rx);
+    netdev_dpdk_slb_rs_out(batch, nb_rx);
 
     return 0;
 }

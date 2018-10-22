@@ -22,11 +22,12 @@
 #include "openvswitch/compiler.h"
 
 struct dp_packet;
+struct dp_packet_batch;
 extern bool vhostuser_no_autoconnect;
 
 /* slb-rs */
 extern void netdev_dpdk_slb_rs_in(struct dp_packet **, unsigned int );
-extern void netdev_dpdk_slb_rs_out(struct dp_packet **, unsigned int );
+extern void netdev_dpdk_slb_rs_out(struct dp_packet_batch *batch, unsigned int );
 
 #ifdef DPDK_NETDEV
 

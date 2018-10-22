@@ -60,6 +60,7 @@ enum {
     ERSTAT          = -4,
     INVREF          = -5,
     BUSY            = -6,
+    DELETE          = -7,
 };
 
 static inline int is_ipv4_pkt_valid(struct ipv4_hdr *iph)

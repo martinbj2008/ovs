@@ -296,7 +296,7 @@ int slb_rs_exit(void);
 
 /* hooks export to ovs-dpdk in datapath */
 void netdev_dpdk_slb_rs_in(struct dp_packet **, unsigned int );
-void netdev_dpdk_slb_rs_out(struct dp_packet **, unsigned int );
+void netdev_dpdk_slb_rs_out(struct dp_packet_batch *batch, unsigned int );
 
 int __slb_rs_in(struct dp_packet * );
 int __slb_rs_out(struct dp_packet * );

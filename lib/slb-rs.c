@@ -737,7 +737,7 @@ void slb_rs_chk_xmit(struct rte_mbuf* m, struct slb_rs_conn* conn)
 	struct in6_addr src;
 	struct eth_addr dmac;
 	struct eth_addr smac;
-        /* struct ether_addr smac; */
+	/* struct ether_addr smac; */
 	struct ip_tnl_info tnl_info;
 	struct rte_eth_dev_info dev_info;
 
@@ -752,7 +752,7 @@ void slb_rs_chk_xmit(struct rte_mbuf* m, struct slb_rs_conn* conn)
 		sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr)
 		+ sizeof(struct udp_hdr) + sizeof(struct vxlan_hdr));
 
-    	if (OVS_UNLIKELY(!pneth)) { 
+    if (OVS_UNLIKELY(!pneth)) { 
 		rte_pktmbuf_free(m);
 		return;
 	}
@@ -817,8 +817,8 @@ void slb_rs_chk_xmit(struct rte_mbuf* m, struct slb_rs_conn* conn)
 	pneth->ether_type = rte_cpu_to_be_16(ETHER_TYPE_IPv4);
 
 	/* send pkt once a pkt */
-        ret = rte_eth_tx_burst(port_id, 1, &m, 1);
-    	if (OVS_UNLIKELY(!ret)) 
+	ret = rte_eth_tx_burst(port_id, 1, &m, 1);
+    if (OVS_UNLIKELY(!ret)) 
 		rte_pktmbuf_free(m);
 
 	return;
@@ -828,22 +828,27 @@ drop:
 }
 
 /* hook export to ovs-dpdk in pmd_thread_main OUTPUT datapath
- * netdev_dpdk_vhost_rxq_recv & netdev_dpdk_eth_send */
-void netdev_dpdk_slb_rs_out(struct dp_packet** pkts, unsigned int cnt)
+ * netdev_dpdk_vhost_rxq_recv */
+void netdev_dpdk_slb_rs_out(struct dp_packet_batch *batch, unsigned int cnt)
 {
-	int i;
+	int ret;
+    struct dp_packet *packet;
+    size_t i, size = dp_packet_batch_size(batch);
 
 	if (OVS_UNLIKELY(slb_disable))
-		return;
+		return ;
 
 	if (OVS_UNLIKELY(cnt <= 0))
 		return ;
 
 	/* ovs-dpdk process a batch of packets */
-	for (i = 0; i < cnt; i++) {
-		if (OVS_LIKELY(pkts[i]))
-			__slb_rs_out(pkts[i]);
-	}
+    DP_PACKET_BATCH_REFILL_FOR_EACH (i, size, packet, batch) {
+        ret = __slb_rs_out(packet);
+        if (OVS_LIKELY(ret != DELETE)) {
+			/* CHISHUI-2521 bug fix: refill packet to avoid packet double free */
+            dp_packet_batch_refill(batch, packet, i);
+        }
+    }
 
 	return ;
 }
@@ -851,9 +856,6 @@ void netdev_dpdk_slb_rs_out(struct dp_packet** pkts, unsigned int cnt)
 int __slb_rs_out(struct dp_packet* pkt)
 {
 	struct rte_mbuf* mbuf = &pkt->mbuf;
-	if (!mbuf)
-		return INVPKT;
-
 	struct ether_hdr* ethdr;
 	struct ipv4_hdr* iph;
 	struct tcp_hdr* tcph;
@@ -893,6 +895,7 @@ int __slb_rs_out(struct dp_packet* pkt)
 			tcp_state_trans(conn, tcph, TOA_DIR_OUTPUT);
 			/* SLB chk */
 			slb_rs_chk_xmit(mbuf, conn);
+			return DELETE;
 		}
 	}
 
