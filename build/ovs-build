@@ -9,7 +9,7 @@ version=$2
 iteration=$3
 
 if [ "$__cmd" = "" ];then
-    __cmd="nodebug-build"
+    __cmd="debug-build"
 fi
 
 function mkrpm(){
@@ -30,7 +30,7 @@ function mkrpm(){
     
     cp usertools/ovs-dpdk.conf build/rpm/etc/openvswitch
     cp usertools/tnl_set_arp.conf build/rpm/etc/supervisord.d/deploy
-    /usr/bin/install -c utilities/ovs-appctl utilities/ovs-dpctl utilities/ovs-ofctl utilities/ovs-vsctl ovsdb/ovsdb-tool ovsdb/ovsdb-client vtep/vtep-ctl './build/rpm/usr/bin'
+    /usr/bin/install -c utilities/ovs-appctl utilities/ovs-dpctl utilities/ovs-ofctl utilities/ovs-vsctl ovsdb/ovsdb-tool ovsdb/ovsdb-client vtep/vtep-ctl utilities/ovs-tcpdump './build/rpm/usr/bin'
     /usr/bin/install -c ovsdb/ovsdb-server vswitchd/ovs-vswitchd './build/rpm/usr/sbin'
     /usr/bin/install -c usertools/didicloud_filter usertools/ovs-hotupgrade usertools/recover usertools/ovs_pre_check usertools/ovs_start usertools/ovs_post_check usertools/ovs_stop usertools/ovs_restart usertools/tnl_set_arp usertools/ovs-dump usertools/dpdk-pdump usertools/ovs-cmd './build/rpm/usr/bin'
     
@@ -55,7 +55,7 @@ function mkrpm(){
 case $__cmd in
     "debug-build")
         make distclean
-        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O0' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O2' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
         sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
         make -j20
         ;;
@@ -72,7 +72,7 @@ case $__cmd in
         fi
         
         make distclean
-        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O0' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-O2' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
         sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
         make -j20
         
@@ -85,7 +85,7 @@ case $__cmd in
         fi
         
         make distclean
-        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-O2' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
+        ./configure  --with-dpdk=$DPDK_BUILD CFLAGS='-g -O2' --bindir=/usr/bin --sbindir=/usr/sbin --datarootdir=/usr/local/share --with-logdir=/var/log/openvswitch
         sed -ie "s/\/\* \#undef DPDK_PDUMP \*\//\#define DPDK_PDUMP 1/g" config.h
         make -j20
 
