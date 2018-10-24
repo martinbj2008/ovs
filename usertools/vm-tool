@@ -1,0 +1,113 @@
+host_ip=`ifconfig eth0 |grep inet|gawk '{print $2}'`
+
+function exe_cmd(){
+    __cmd=$1
+    __para1=$2
+    __para2=$3
+    __para3=$4
+    __para4=$5
+    __para5=$6
+    __para6=$7
+    __para7=$8
+    __para8=${9}
+    __para9=${10}
+    echo "        Mac        |       eip        |       ip       |       host_ip        |           host_name          |  vni  |                   uuid              |"
+    echo "------------------------------------------------------------------------------------------------------------------------------------------------------------"
+    case $__cmd in
+        "list-vm")
+            curl -s 10.79.34.51:12345/v1.0/ports?host=${host_ip}| python -m json.tool > /tmp/curl_rst
+            vm_cnt=`cat /tmp/curl_rst |grep mac|wc -l`
+            host_name=`dig -x ${host_ip}|grep didi|gawk '{print $5}'`
+            i=1
+            while [ $i -le $vm_cnt ];do
+                mac=`cat /tmp/curl_rst |grep mac|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                eip=`cat /tmp/curl_rst |grep eip|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                ip=`cat /tmp/curl_rst |grep fixed_ip|grep -v fixed_ip_mask|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                vni=`cat /tmp/curl_rst |grep vni|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                uuid=`ovs-vsctl list interface |grep -A 15 $mac|grep name|gawk -F ':' '{print $2}'|sed 's/\"//g'`
+                [ -z "$eip" ] && eip="             "
+                echo "$mac      $eip      $ip      $host_ip                ${host_name:0:16}         $vni               $uuid"
+                i=`expr  $i + 1`
+            done
+            ;;
+        "mac-vm")
+            curl -s 10.79.34.51:12345/v1.0/ports?mac=${__para1}| python -m json.tool > /tmp/curl_rst
+            mac=`cat /tmp/curl_rst |grep mac|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            eip=`cat /tmp/curl_rst |grep eip|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            ip=`cat /tmp/curl_rst |grep fixed_ip|grep -v fixed_ip_mask|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            vni=`cat /tmp/curl_rst |grep vni|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            host_ip=`cat /tmp/curl_rst |grep host_id|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            host_name=`dig -x ${host_ip}|grep didi|gawk '{print $5}'`
+            uuid=`ovs-vsctl list interface |grep -A 15 $mac|grep name|gawk -F ':' '{print $2}'|sed 's/\"//g'`
+            [ -z "$eip" ] && eip="             "
+            echo "$mac      $eip      $ip      $host_ip                ${host_name:0:16}         $vni               $uuid"
+            ;;
+        "eip-vm")
+            curl -s 10.79.34.51:12345/v1.0/ports?eip=${__para1}| python -m json.tool >  /tmp/curl_rst
+            mac=`cat /tmp/curl_rst  |grep mac|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            eip=`cat /tmp/curl_rst  |grep eip|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            ip=`cat /tmp/curl_rst  |grep fixed_ip|grep -v fixed_ip_mask|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            vni=`cat /tmp/curl_rst  |grep vni|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            host_ip=`cat /tmp/curl_rst  |grep host_id|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            host_name=`dig -x ${host_ip}|grep didi|gawk '{print $5}'`
+            uuid=`ovs-vsctl list interface |grep -A 15 $mac|grep name|gawk -F ':' '{print $2}'|sed 's/\"//g'`
+            [ -z "$eip" ] && eip="             "
+            echo "$mac      $eip      $ip      $host_ip                ${host_name:0:16}         $vni               $uuid"
+            ;;
+        "ip-vm")
+            curl -s 10.79.34.51:12345/v1.0/ports?ip=${__para1}| python -m json.tool > /tmp/curl_rst
+            mac=`cat /tmp/curl_rst  |grep mac|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            eip=`cat /tmp/curl_rst  |grep eip|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            ip=`cat /tmp/curl_rst |grep fixed_ip|grep -v fixed_ip_mask|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            vni=`cat /tmp/curl_rst |grep vni|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            host_ip=`cat /tmp/curl_rst  |grep host_id|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+            host_name=`dig -x ${host_ip}|grep didi|gawk '{print $5}'`
+            uuid=`ovs-vsctl list interface |grep -A 15 $mac|grep name|gawk -F ':' '{print $2}'|sed 's/\"//g'`
+            [ -z "$eip" ] && eip="             "
+            echo "$mac      $eip      $ip      $host_ip                ${host_name:0:16}         $vni               $uuid"
+            ;;
+        "ping-vm")
+            curl -s 10.79.34.51:12345/v1.0/ports?host=${host_ip}| python -m json.tool > /tmp/curl_rst
+            vm_cnt=`cat /tmp/curl_rst |grep mac|wc -l`
+            i=1
+            echo "" > /tmp/diseip
+            while [ $i -le $vm_cnt ];do
+                eip=`cat /tmp/curl_rst |grep eip|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                [ -n "$eip" ] && ping -c 1 $eip && [ $? != 0 ] && echo $eip >> /tmp/diseip
+                i=`expr  $i + 1`
+            done
+            ;;
+        "filter_check")
+            curl -s 10.79.34.51:12345/v1.0/ports?host=${host_ip}| python -m json.tool > /tmp/curl_rst
+            vm_cnt=`cat /tmp/curl_rst |grep mac|wc -l`
+            i=1
+            echo "" > /tmp/diseip
+            while [ $i -le $vm_cnt ];do
+                mac=`cat /tmp/curl_rst  |grep mac|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                filter_cnt=`ethtool -n eth0|grep -i $mac|wc -l`
+                if [ $filter_cnt -ne 1 ];then
+                    eip=`cat /tmp/curl_rst |grep eip|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                    ip=`cat /tmp/curl_rst |grep fixed_ip|grep -v fixed_ip_mask|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                    vni=`cat /tmp/curl_rst |grep vni|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                    host_ip=`cat /tmp/curl_rst  |grep host_id|gawk '{print $2}'|sed 's/\"//g'|sed 's/\,//g'|sed -n "${i}p"`
+                    host_name=`dig -x ${host_ip}|grep didi|gawk '{print $5}'`
+                    uuid=`ovs-vsctl list interface |grep -A 15 $mac|grep name|gawk -F ':' '{print $2}'|sed 's/\"//g'`
+                    [ -z "$eip" ] && eip="             "
+                    echo "$mac      $eip      $ip      $host_ip                ${host_name:0:16}         $vni               $uuid"
+                fi
+                i=`expr  $i + 1`
+            done
+            ;;
+        *)
+	    echo "Uknown CMD $__cmd"
+        echo "Try \"ovs-cmd help\""
+            exit
+            ;;
+    esac
+}
+
+exe_cmd $1 $2
+
+
+
+
