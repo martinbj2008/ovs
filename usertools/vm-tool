@@ -1,4 +1,4 @@
-host_ip=`ifconfig eth0 |grep inet|gawk '{print $2}'`
+host_ip=`ip address show dev eth0 |grep inet |gawk '{print $2}'| gawk -F '/' '{print $1}'`
 
 function exe_cmd(){
     __cmd=$1

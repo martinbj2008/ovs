@@ -21,4 +21,5 @@ EXTRA_DIST += \
 		usertools/tnl_set_arp.conf \
 		usertools/ovs-dump \
 		usertools/dpdk-pdump \
-		usertools/ovs-cmd
+		usertools/ovs-cmd  \
+		usertools/vm-tool
