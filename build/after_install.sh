@@ -3,3 +3,6 @@ if [ -f /tmp/ovs-dpdk.conf ];then
     sed -ie "s/OVS_MODE=\"active\"/OVS_MODE=\"$curr_mode\"/g" /etc/openvswitch/ovs-dpdk.conf
     #rm -f /tmp/ovs-dpdk.conf
 fi
+
+cd /tmp/python/
+python setup.py install
