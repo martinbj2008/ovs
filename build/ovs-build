@@ -25,11 +25,14 @@ function mkrpm(){
     mkdir -p './rpm/usr/local/share/man/man7'
     mkdir -p './rpm/usr/local/share/man/man8'
     mkdir -p './rpm/tmp'
-    
+    mkdir -p './rpm/usr/lib/systemd/system/'
+
     cd ..
     
     cp usertools/ovs-dpdk.conf build/rpm/etc/openvswitch
     cp usertools/tnl_set_arp.conf build/rpm/etc/supervisord.d/deploy
+    cp usertools/openvswitch.service build/rpm/usr/lib/systemd/system/
+
     /usr/bin/install -c utilities/ovs-appctl utilities/ovs-dpctl utilities/ovs-ofctl utilities/ovs-vsctl ovsdb/ovsdb-tool ovsdb/ovsdb-client vtep/vtep-ctl utilities/ovs-tcpdump './build/rpm/usr/bin'
     /usr/bin/install -c ovsdb/ovsdb-server vswitchd/ovs-vswitchd './build/rpm/usr/sbin'
     /usr/bin/install -c usertools/didicloud_filter usertools/ovs-hotupgrade usertools/recover usertools/ovs_pre_check usertools/ovs_start usertools/ovs_post_check usertools/ovs_stop usertools/ovs_restart usertools/tnl_set_arp usertools/ovs-dump usertools/dpdk-pdump usertools/ovs-cmd usertools/vm-tool './build/rpm/usr/bin'
@@ -44,7 +47,7 @@ function mkrpm(){
     
     make install
     cp -r /usr/local/share/openvswitch './build/rpm/usr/local/share'
-    
+
     cd build
     rm -f openvswitch-2.9.0-${version}-${iteration}.x86_64.rpm
     fpm -s dir -t rpm -n openvswitch-2.9.0 -v $version --iteration $iteration --pre-install=./before_install.sh --post-install=./after_install.sh --prefix=/ -C ./rpm

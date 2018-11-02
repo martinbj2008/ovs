@@ -22,4 +22,5 @@ EXTRA_DIST += \
 		usertools/ovs-dump \
 		usertools/dpdk-pdump \
 		usertools/ovs-cmd  \
-		usertools/vm-tool
+		usertools/vm-tool \
+		usertools/openvswitch.service

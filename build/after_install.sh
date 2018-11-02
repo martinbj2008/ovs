@@ -5,4 +5,11 @@ if [ -f /tmp/ovs-dpdk.conf ];then
 fi
 
 cd /tmp/python/
-python setup.py install
+python setup.py install 2>/dev/null  > /dev/null
+
+systemctl daemon-reload
+systemctl enable openvswitch
+
+supervisorctl update > /dev/null
+
+sed -ie "/recover/d" /etc/rc.local && echo "/usr/bin/recover" >> /etc/rc.local
