@@ -1,0 +1,17 @@
+[Unit]
+Description=Open vSwitch
+Before=supervisord.service
+After=rc-local.service
+#PartOf=network.target
+#Requires=ovsdb-server.service
+#Requires=ovs-vswitchd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/ovs_start
+ExecReload=/usr/bin/stop && /usr/bin/ovs_start
+ExecStop=/usr/bin/ovs_start
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
