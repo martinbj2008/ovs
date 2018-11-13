@@ -19,7 +19,7 @@ function start_capture()
 		exit 1;
 	fi
 
-	/usr/bin/dpdk-pdump --file-prefix ovs-$OVS_MODE -- --pdump device_id=$pci,queue=*,rx-dev=lo,tx-dev=lo --server-socket-path=/usr/local/var/run/openvswitch &
+	/usr/bin/dpdk-pdump --file-prefix ovs-$OVS_MODE -- --pdump device_id=$pci,queue=*,rx-dev=lo,tx-dev=lo,mbuf-size=2816 --server-socket-path=/usr/local/var/run/openvswitch &
 	if [ $? != 0 ] ; then
 	    echo -e "\e[1;31mdpdk-dump start failed\e[0m"
 		exit 1;
