@@ -8,7 +8,7 @@ DUMP_FLAG=
 function start_capture()
 {
 	local pid=`pidof dpdk-pdump`
-	if [ $? != 0 ] ; then
+	if [ -n "$pid" ] ; then
 	    echo -e "\e[1;31mdpdk-dump is already running\e[0m"
 		exit 1;
 	fi
