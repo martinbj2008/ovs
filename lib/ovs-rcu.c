@@ -220,8 +220,13 @@ ovsrcu_synchronize(void)
 
         elapsed = time_msec() - start;
         if (elapsed >= warning_threshold) {
-            VLOG_WARN("blocked %u ms waiting for %s to quiesce",
-                      elapsed, stalled_thread);
+            if(elapsed > 500){
+                VLOG_WARN("blocked %u ms waiting for %s to quiesce",
+                          elapsed, stalled_thread);
+            }else{
+                VLOG_DBG("blocked %u ms waiting for %s to quiesce",
+                          elapsed, stalled_thread);
+            }
             warning_threshold *= 2;
         }
         poll_timer_wait_until(start + warning_threshold);
