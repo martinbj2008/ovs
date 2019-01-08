@@ -24,6 +24,7 @@ ERR_ARG_ERR2="14"	# 14  参数格式不正确
 ERR_ETHTOOL_ERR1="15"	# 15. ethtool 添加规则失败 
 ERR_ETHTOOL_ERR2="16"	# 16. 当前系统不存在任何ethtool 规则
 ERR_ETHTOOL_ERR3="17"	# 17. 系统不存在要删除的规则
+ERR_ETHTOOL_ERR4="18"   # 18. 要添加的规则已经存在
 
 
 net_driver="/sys/bus/pci/drivers/i40e"
@@ -46,6 +47,16 @@ function vf_id()
 	echo ${virtfn:6}
 }
 
+function check_filter_exist()
+{
+    local pf=$1
+    local userdef=$2
+    local mac=$3
+    
+    filter_userdef=`ethtool -n $pf|grep -B 3 -i $mac|grep User-defined|gawk '{print $2}'`
+    [ "$filter_userdef" == "$userdef" ] && return 1
+}
+
 function ethtool_cmd()
 {
 	local ops=$1
@@ -59,6 +70,9 @@ function ethtool_cmd()
 	userdef=0x8000000000${vni}
 
 	if [ "$ops" == "add" ]; then
+		check_filter_exist $pf $userdef $mac
+        	[ $? -ne 0 ] && log_info "Add rule has exsit: mac[$mac], vni[$vni]" && echo $ERR_ETHTOOL_ERR4 && return 1
+
 		log_info "ethtool -N $pf flow-type ether src $mac user-def $userdef action 0x${vf}00000000"
 
 		r=`ethtool -N $pf flow-type ether src $mac user-def  0x8000000000${vni} action 0x${vf}00000000`
