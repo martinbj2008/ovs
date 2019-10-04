@@ -2917,7 +2917,6 @@ odp_tun_key_from_attr__(const struct nlattr *attr, bool is_mask,
     static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
     unsigned int left;
     const struct nlattr *a;
-    bool ttl = false;
     bool unknown = false;
 
     NL_NESTED_FOR_EACH(a, left, attr) {
@@ -2955,7 +2954,6 @@ odp_tun_key_from_attr__(const struct nlattr *attr, bool is_mask,
             break;
         case OVS_TUNNEL_KEY_ATTR_TTL:
             tun->ip_ttl = nl_attr_get_u8(a);
-            ttl = true;
             break;
         case OVS_TUNNEL_KEY_ATTR_DONT_FRAGMENT:
             tun->flags |= FLOW_TNL_F_DONT_FRAGMENT;
@@ -3018,10 +3016,6 @@ odp_tun_key_from_attr__(const struct nlattr *attr, bool is_mask,
         }
     }
 
-    if (!ttl) {
-        odp_parse_error(&rl, errorp, "tunnel options missing TTL");
-        return ODP_FIT_ERROR;
-    }
     if (unknown) {
         return ODP_FIT_TOO_MUCH;
     }
