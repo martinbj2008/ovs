@@ -42,6 +42,18 @@ extern "C" {
     ((unsigned int) ((UUID)->parts[2] & 0xffff)),   \
     ((unsigned int) ((UUID)->parts[3]))
 
+/*
+  The auto generated ufid of ovs is random,
+    according RFC 4122, its u32[2],u32[1] will not be zero.
+  In our gw appctl, only use u32[0] and u32[3],
+    while keep u32[2],u32[1] as zero,
+
+   UUID_FMT "%08x-%04x-%04x-%04x-%04x%08x"
+   format xxxxxxxx-0000-0000-0000-0000xxxxxxxx
+    ex: 12345678-0000-0000-0000-0000ABCD1234
+*/
+#define is_gw_appctl_ufid(ufid)    (!(ufid)->u32[1] && !(ufid)->u32[2])
+
 /* Returns a hash value for 'uuid'.  This hash value is the same regardless of
  * whether we are running on a 32-bit or 64-bit or big-endian or little-endian
  * architecture. */

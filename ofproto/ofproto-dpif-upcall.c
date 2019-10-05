@@ -48,6 +48,8 @@
 #define UPCALL_MAX_BATCH 64
 #define REVALIDATE_MAX_BATCH 50
 
+#define is_appctl_flow(f)     \
+    ((f)->ufid_present && is_gw_appctl_ufid(&(f)->ufid))
 VLOG_DEFINE_THIS_MODULE(ofproto_dpif_upcall);
 
 COVERAGE_DEFINE(dumped_duplicate_flow);
@@ -2639,6 +2641,9 @@ revalidate(struct revalidator *revalidator)
             bool already_dumped;
             int error;
 
+            if (is_appctl_flow(f))
+                continue;
+
             if (ukey_acquire(udpif, f, &ukey, &error)) {
                 if (error == EBUSY) {
                     /* Another thread is processing this flow, so don't bother
@@ -2746,6 +2751,9 @@ revalidator_sweep__(struct revalidator *revalidator, bool purge)
 
         CMAP_FOR_EACH(ukey, cmap_node, &umap->cmap) {
             enum ukey_state ukey_state;
+
+            if (is_appctl_flow(ukey))
+                continue;
 
             /* Handler threads could be holding a ukey lock while it installs a
              * new flow, so don't hang around waiting for access to it. */
