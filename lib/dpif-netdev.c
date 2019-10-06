@@ -246,7 +246,7 @@ static void dpcls_init(struct dpcls *);
 static void dpcls_destroy(struct dpcls *);
 static void dpcls_sort_subtable_vector(struct dpcls *);
 static void dpcls_insert(struct dpcls *, struct dpcls_rule *,
-                         const struct netdev_flow_key *mask);
+                         const struct netdev_flow_key *mask, bool is_appctl);
 static void dpcls_remove(struct dpcls *, struct dpcls_rule *);
 static bool dpcls_lookup(struct dpcls *cls,
                          const struct netdev_flow_key *keys[],
@@ -3246,7 +3246,7 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
 
     /* Select dpcls for in_port. Relies on in_port to be exact match. */
     cls = dp_netdev_pmd_find_dpcls(pmd, in_port);
-    dpcls_insert(cls, &flow->cr, &mask);
+    dpcls_insert(cls, &flow->cr, &mask, is_gw_appctl_ufid(ufid));
 
     cmap_insert(&pmd->flow_table, CONST_CAST(struct cmap_node *, &flow->node),
                 dp_netdev_flow_hash(&flow->ufid));
@@ -7733,12 +7733,14 @@ dpcls_create_subtable(struct dpcls *cls, const struct netdev_flow_key *mask)
 }
 
 static inline struct dpcls_subtable *
-dpcls_find_subtable(struct dpcls *cls, const struct netdev_flow_key *mask)
+dpcls_find_subtable(struct dpcls *cls, const struct netdev_flow_key *mask, bool is_appctl)
 {
     struct dpcls_subtable *subtable;
 
     CMAP_FOR_EACH_WITH_HASH (subtable, cmap_node, mask->hash,
                              &cls->subtables_map) {
+        if (subtable->is_appctl != is_appctl)
+            continue;
         if (netdev_flow_key_equal(&subtable->mask, mask)) {
             return subtable;
         }
@@ -7755,7 +7757,8 @@ dpcls_sort_subtable_vector(struct dpcls *cls)
     struct dpcls_subtable *subtable;
 
     PVECTOR_FOR_EACH (subtable, pvec) {
-        pvector_change_priority(pvec, subtable, subtable->hit_cnt);
+        pvector_change_priority(pvec, subtable,
+            subtable->is_appctl ? INT_MAX/2 : subtable->hit_cnt);
         subtable->hit_cnt = 0;
     }
     pvector_publish(pvec);
@@ -7837,10 +7840,11 @@ dp_netdev_pmd_try_optimize(struct dp_netdev_pmd_thread *pmd,
 /* Insert 'rule' into 'cls'. */
 static void
 dpcls_insert(struct dpcls *cls, struct dpcls_rule *rule,
-             const struct netdev_flow_key *mask)
+             const struct netdev_flow_key *mask, bool is_appctl)
 {
-    struct dpcls_subtable *subtable = dpcls_find_subtable(cls, mask);
+    struct dpcls_subtable *subtable = dpcls_find_subtable(cls, mask, is_appctl);
 
+    subtable->is_appctl = is_appctl;
     /* Refer to subtable's mask, also for later removal. */
     rule->mask = &subtable->mask;
     cmap_insert(&subtable->rules, &rule->cmap_node, rule->flow.hash);
