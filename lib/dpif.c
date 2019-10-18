@@ -920,6 +920,22 @@ dpif_flow_hash(const struct dpif *dpif OVS_UNUSED,
     uuid_set_bits_v4((struct uuid *)hash);
 }
 
+/* used for dpctl commands generate uuid function*/
+void
+dpif_flow_hash_dpctl_commands(const struct dpif *dpif OVS_UNUSED,
+               const void *key, size_t key_len, ovs_u128 *hash)
+{
+    static struct ovsthread_once once = OVSTHREAD_ONCE_INITIALIZER;
+    static uint32_t secret;
+
+    if (ovsthread_once_start(&once)) {
+        secret = random_uint32();
+        ovsthread_once_done(&once);
+    }
+    hash_bytes128(key, key_len, secret, hash);
+    uuid_set_bits_v4_dpctl_commands((struct uuid *)hash);
+}
+
 /* Deletes all flows from 'dpif'.  Returns 0 if successful, otherwise a
  * positive errno value.  */
 int

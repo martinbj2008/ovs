@@ -522,6 +522,8 @@ bool dpif_probe_feature(struct dpif *, const char *name,
                         const ovs_u128 *ufid);
 void dpif_flow_hash(const struct dpif *, const void *key, size_t key_len,
                     ovs_u128 *hash);
+void dpif_flow_hash_dpctl_commands(const struct dpif *, const void *key, size_t key_len,
+                    ovs_u128 *hash);
 int dpif_flow_flush(struct dpif *);
 int dpif_flow_put(struct dpif *, enum dpif_flow_put_flags,
                   const struct nlattr *key, size_t key_len,

@@ -119,6 +119,24 @@ uuid_set_bits_v4(struct uuid *uuid)
     uuid->parts[1] |=  0x00004000;
 }
 
+/*
+ * Add for dpctl ufid generate pattern
+ * uuid:
+ * xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxx-xxxxxxxx
+ * uuid for dpctl commands:
+ * xxxxxxxx-xxxx-bxxx-[4567]xxx-xxxx-00000000
+ *
+ */
+void
+uuid_set_bits_v4_dpctl_commands(struct uuid *uuid)
+{
+    uuid->parts[2] |=  0xc0000000;
+    uuid->parts[2] &= ~0x80000000;
+    uuid->parts[1] |=  0x0000f000;
+    uuid->parts[1] &= ~0x00004000;
+    uuid->parts[3] = 0x0;
+}
+
 /* Sets 'uuid' to all-zero-bits. */
 void
 uuid_zero(struct uuid *uuid)

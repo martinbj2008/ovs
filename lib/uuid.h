@@ -48,11 +48,14 @@ extern "C" {
   In our gw appctl, only use u32[0] and u32[3],
     while keep u32[2],u32[1] as zero,
 
-   UUID_FMT "%08x-%04x-%04x-%04x-%04x%08x"
-   format xxxxxxxx-0000-0000-0000-0000xxxxxxxx
-    ex: 12345678-0000-0000-0000-0000ABCD1234
+    UUID_FMT "%08x-%04x-%04x-%04x-%04x%08x"
+    format
+    example rfc4122 uuid:
+    xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxx-xxxxxxxx
+    example uuid for dpctl commands:
+    xxxxxxxx-xxxx-bxxx-[4567]xxx-xxxx-00000000
 */
-#define is_gw_appctl_ufid(ufid)    (!(ufid)->u32[1] && !(ufid)->u32[2])
+#define is_gw_appctl_ufid(ufid) ((((ufid)->u32[1] >> 12 & 0xf) == 0xb) && ((ufid)->u32[2] >>30 == 0x1))
 
 /* Returns a hash value for 'uuid'.  This hash value is the same regardless of
  * whether we are running on a 32-bit or 64-bit or big-endian or little-endian
@@ -96,6 +99,7 @@ bool uuid_from_string_prefix(struct uuid *, const char *);
 int uuid_is_partial_string(const char *);
 int uuid_is_partial_match(const struct uuid *, const char *match);
 void uuid_set_bits_v4(struct uuid *);
+void uuid_set_bits_v4_dpctl_commands(struct uuid *);
 
 #ifdef __cplusplus
 }

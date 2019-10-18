@@ -253,6 +253,7 @@ static bool dpcls_lookup(struct dpcls *cls,
                          struct dpcls_rule **rules, size_t cnt,
                          int *num_lookups_p);
 
+static inline bool is_dpctl_commands_need_generate_ufid(const ovs_u128* ufid);
 /* Set of supported meter flags */
 #define DP_SUPPORTED_METER_FLAGS_MASK \
     (OFPMF13_STATS | OFPMF13_PKTPS | OFPMF13_KBPS | OFPMF13_BURST)
@@ -2974,11 +2975,18 @@ dp_netdev_pmd_find_flow(const struct dp_netdev_pmd_thread *pmd,
     struct flow flow;
     ovs_u128 ufid;
 
-    /* If a UFID is not provided, determine one based on the key. */
-    if (!ufidp && key && key_len
-        && !dpif_netdev_flow_from_nlattrs(key, key_len, &flow, false)) {
-        dpif_flow_hash(pmd->dp->dpif, &flow, sizeof flow, &ufid);
-        ufidp = &ufid;
+    if (key && key_len && !dpif_netdev_flow_from_nlattrs(key, key_len, &flow, false)) {
+        /* If a UFID is not provided, determine one based on the key. */
+        if (!ufidp) {
+            dpif_flow_hash(pmd->dp->dpif, &flow, sizeof flow, &ufid);
+            ufidp = &ufid;
+        }else {
+            /* If appctl cmd need generated ufid ,we will generate that by dpctl pattern*/
+            if (is_dpctl_commands_need_generate_ufid(ufidp)){
+                dpif_flow_hash_dpctl_commands(pmd->dp->dpif, &flow, sizeof flow, &ufid);
+                ufidp = &ufid;
+            }
+        }
     }
 
     if (ufidp) {
@@ -3317,6 +3325,10 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
 
     ovs_mutex_lock(&pmd->flow_mutex);
     netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL);
+    if (netdev_flow && !is_gw_appctl_ufid(&netdev_flow->ufid) && is_gw_appctl_ufid(ufid) && put->flags & DPIF_FP_CREATE) { //when flow add confict, appctl flow will ignore normal upcall flows
+        netdev_flow = NULL;
+    }
+
     if (!netdev_flow) {
         if (put->flags & DPIF_FP_CREATE) {
             if (cmap_count(&pmd->flow_table) < MAX_FLOWS) {
@@ -3371,6 +3383,14 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
     return error;
 }
 
+static inline bool is_dpctl_commands_need_generate_ufid(const ovs_u128* ufid)
+{
+    if (ufid->u32[1] == 0xFFFFFFFF && ufid->u32[2] == 0xFFFFFFFF)
+        return true;
+
+    return false;
+}
+
 static int
 dpif_netdev_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
 {
@@ -3398,7 +3418,10 @@ dpif_netdev_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
     }
 
     if (put->ufid) {
-        ufid = *put->ufid;
+        if (is_dpctl_commands_need_generate_ufid(put->ufid))
+            dpif_flow_hash_dpctl_commands(dpif, &match.flow, sizeof match.flow, &ufid);
+        else
+            ufid = *put->ufid;
     } else {
         dpif_flow_hash(dpif, &match.flow, sizeof match.flow, &ufid);
     }

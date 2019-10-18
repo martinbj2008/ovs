@@ -1132,6 +1132,12 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
         goto out_freeactions;
     }
 
+    if (!ufid_present) {
+        ufid.u32[1] = 0xFFFFFFFF;
+        ufid.u32[2] = 0xFFFFFFFF;
+        ufid_present = true;
+    }//used for dpctl layer generated ufid by defined pattern
+
     /* The flow will be added on all pmds currently in the datapath. */
     error = dpif_flow_put(dpif, flags,
                           key.data, key.size,
@@ -1277,6 +1283,12 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
         free(error_s);
         goto out;
     }
+
+    if (!ufid_present) {
+        ufid.u32[1] = 0xFFFFFFFF;
+        ufid.u32[2] = 0xFFFFFFFF;
+        ufid_present = true;
+    }//used for dpctl layer generated ufid by defined pattern
 
     /* The flow will be deleted from all pmds currently in the datapath. */
     error = dpif_flow_del(dpif, key.data, key.size,
