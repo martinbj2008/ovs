@@ -812,6 +812,8 @@ format_dpif_flow(struct ds *ds, const struct dpif_flow *f, struct hmap *ports,
         odp_format_ufid(&f->ufid, ds);
         ds_put_cstr(ds, ", ");
     }
+
+    ds_put_format(ds, "priority:%d, ", f->priority);
     odp_flow_format(f->key, f->key_len, f->mask, f->mask_len, ports, ds,
                     dpctl_p->verbosity);
     ds_put_cstr(ds, ", ");
@@ -1093,6 +1095,7 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
     bool ufid_present;
     struct simap port_names;
     int n, error;
+    uint32_t priority = DEFAULT_DPCTL_DPCLS_FLOW_PRI;
 
     error = opt_dpif_open(argc, argv, dpctl_p, 4, &dpif);
     if (error) {
@@ -1107,6 +1110,14 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
     } else if (n) {
         key_s += n;
         ufid_present = true;
+    }
+
+    n = odp_priority_from_string(key_s, &priority);
+    if (n < 0) {
+        dpctl_error(dpctl_p, -n, "parsing flow priority");
+        return -n;
+    } else if (n) {
+        key_s += n;
     }
 
     simap_init(&port_names);
@@ -1133,8 +1144,7 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
     }
 
     if (!ufid_present) {
-        ufid.u32[1] = 0xFFFFFFFF;
-        ufid.u32[2] = 0xFFFFFFFF;
+        ufid.u32[1] = APPCTL_UFID_GEN_MAGIC_CODE;
         ufid_present = true;
     }//used for dpctl layer generated ufid by defined pattern
 
@@ -1145,6 +1155,7 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
                           mask.size, actions.data,
                           actions.size, ufid_present ? &ufid : NULL,
                           PMD_ID_NULL,
+                          priority,
                           dpctl_p->print_statistics ? &stats : NULL);
 
     if (error) {
@@ -1252,6 +1263,7 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
     bool ufid_present;
     struct simap port_names;
     int n, error;
+    uint32_t priority = DEFAULT_DPCTL_DPCLS_FLOW_PRI; //only used to parse, del op not need priority parameter
 
     error = opt_dpif_open(argc, argv, dpctl_p, 3, &dpif);
     if (error) {
@@ -1266,6 +1278,14 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
     } else if (n) {
         key_s += n;
         ufid_present = true;
+    }
+    
+    n = odp_priority_from_string(key_s, &priority);
+    if (n < 0) {
+        dpctl_error(dpctl_p, -n, "parsing flow priority");
+        return -n;
+    } else if (n) {
+        key_s += n;
     }
 
     simap_init(&port_names);
@@ -1285,8 +1305,7 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
     }
 
     if (!ufid_present) {
-        ufid.u32[1] = 0xFFFFFFFF;
-        ufid.u32[2] = 0xFFFFFFFF;
+        ufid.u32[1] = APPCTL_UFID_GEN_MAGIC_CODE;
         ufid_present = true;
     }//used for dpctl layer generated ufid by defined pattern
 

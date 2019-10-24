@@ -8428,3 +8428,23 @@ commit_odp_actions(const struct flow *flow, struct flow *base,
 
     return slow1 ? slow1 : slow2;
 }
+
+int
+odp_priority_from_string(const char *s_, uint32_t * ppriority)
+{
+    const char *s = s_;
+    int len = 0;
+
+    if (ovs_scan(s, "priority:")) {
+        s += 9;
+        len = scan_u32(s, ppriority, NULL);
+        if (len && (*ppriority > MAX_DPCLS_FLOW_PRI || *ppriority == MIN_DPCLS_FLOW_PRI)) { // MIN_DPCLS_FLOW_PRI is reserved for ofctl generated dpcls rule
+            return -EINVAL;
+        }
+
+        s += len;
+        return  s-s_;
+    }
+
+    return 0;
+}

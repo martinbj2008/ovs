@@ -246,7 +246,7 @@ static void dpcls_init(struct dpcls *);
 static void dpcls_destroy(struct dpcls *);
 static void dpcls_sort_subtable_vector(struct dpcls *);
 static void dpcls_insert(struct dpcls *, struct dpcls_rule *,
-                         const struct netdev_flow_key *mask, bool is_appctl);
+                         const struct netdev_flow_key *mask, bool is_appctl, uint32_t priority);
 static void dpcls_remove(struct dpcls *, struct dpcls_rule *);
 static bool dpcls_lookup(struct dpcls *cls,
                          const struct netdev_flow_key *keys[],
@@ -520,6 +520,7 @@ struct dp_netdev_flow {
     const unsigned pmd_id;       /* The 'core_id' of pmd thread owning this */
                                  /* flow. */
 
+    uint32_t priority;          /*add for dpcls subtable priority, this is same with subtable*/
     /* Number of references.
      * The classifier owns one reference.
      * Any thread trying to keep a rule from being freed should hold its own
@@ -1072,6 +1073,27 @@ pmd_info_show_stats(struct ds *reply,
                   stats[PMD_CYCLES_ITER_BUSY], total_packets);
 }
 
+static void dump_subtable_address(struct dp_netdev_pmd_thread *pmd) {
+    struct dpcls *cls;
+    struct dpcls_subtable *subtable;
+    char buf[2048] = {0};
+    int l=0, num = 0;
+
+    if (!ovs_mutex_trylock(&pmd->flow_mutex)) {
+        CMAP_FOR_EACH (cls, node, &pmd->classifiers)
+            if (OVS_LIKELY(cls)) {
+                l += sprintf(buf+l, "pmd:%d, port:%d\n", pmd->core_id, cls->in_port);
+                PVECTOR_FOR_EACH(subtable, &cls->subtables) {
+                    ++num;
+                    l += sprintf(buf+l, "addr:%p, priority=%d\n", subtable, subtable->priority);
+                }
+            }
+    }
+
+    ovs_mutex_unlock(&pmd->flow_mutex);
+    VLOG_INFO("%s,%d,%s", __FUNCTION__, __LINE__, buf);
+}
+
 static void
 pmd_info_show_perf(struct ds *reply,
                    struct dp_netdev_pmd_thread *pmd,
@@ -1111,6 +1133,8 @@ pmd_info_show_perf(struct ds *reply,
         }
         free(time_str);
     }
+    
+    dump_subtable_address(pmd);
 }
 
 static int
@@ -3070,6 +3094,7 @@ dp_netdev_flow_to_dpif_flow(const struct dp_netdev_flow *netdev_flow,
     flow->ufid = netdev_flow->ufid;
     flow->ufid_present = true;
     flow->pmd_id = netdev_flow->pmd_id;
+    flow->priority = netdev_flow->priority;
     get_dpif_flow_stats(netdev_flow, &flow->stats);
 
     flow->attrs.offloaded = false;
@@ -3209,7 +3234,7 @@ dp_netdev_get_mega_ufid(const struct match *match, ovs_u128 *mega_ufid)
 
 static struct dp_netdev_flow *
 dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
-                   struct match *match, const ovs_u128 *ufid,
+                   struct match *match, const ovs_u128 *ufid, uint32_t priority,
                    const struct nlattr *actions, size_t actions_len)
     OVS_REQUIRES(pmd->flow_mutex)
 {
@@ -3248,13 +3273,14 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
     *CONST_CAST(ovs_u128 *, &flow->ufid) = *ufid;
     ovs_refcount_init(&flow->ref_cnt);
     ovsrcu_set(&flow->actions, dp_netdev_actions_create(actions, actions_len));
+    flow->priority = priority;
 
     dp_netdev_get_mega_ufid(match, CONST_CAST(ovs_u128 *, &flow->mega_ufid));
     netdev_flow_key_init_masked(&flow->cr.flow, &match->flow, &mask);
 
     /* Select dpcls for in_port. Relies on in_port to be exact match. */
     cls = dp_netdev_pmd_find_dpcls(pmd, in_port);
-    dpcls_insert(cls, &flow->cr, &mask, is_gw_appctl_ufid(ufid));
+    dpcls_insert(cls, &flow->cr, &mask, is_gw_appctl_ufid(ufid), priority);
 
     cmap_insert(&pmd->flow_table, CONST_CAST(struct cmap_node *, &flow->node),
                 dp_netdev_flow_hash(&flow->ufid));
@@ -3332,7 +3358,7 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
     if (!netdev_flow) {
         if (put->flags & DPIF_FP_CREATE) {
             if (cmap_count(&pmd->flow_table) < MAX_FLOWS) {
-                dp_netdev_flow_add(pmd, match, ufid, put->actions,
+                dp_netdev_flow_add(pmd, match, ufid, put->priority, put->actions,
                                    put->actions_len);
                 error = 0;
             } else {
@@ -3385,7 +3411,7 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
 
 static inline bool is_dpctl_commands_need_generate_ufid(const ovs_u128* ufid)
 {
-    if (ufid->u32[1] == 0xFFFFFFFF && ufid->u32[2] == 0xFFFFFFFF)
+    if (ufid->u32[1] == APPCTL_UFID_GEN_MAGIC_CODE)
         return true;
 
     return false;
@@ -6650,7 +6676,7 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
         ovs_mutex_lock(&pmd->flow_mutex);
         netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL);
         if (OVS_LIKELY(!netdev_flow)) {
-            netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid,
+            netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid, MIN_DPCLS_FLOW_PRI,
                                              add_actions->data,
                                              add_actions->size);
         }
@@ -7744,7 +7770,8 @@ dpcls_create_subtable(struct dpcls *cls, const struct netdev_flow_key *mask)
     if (!subtable->lookup_func) {
         subtable->lookup_func = dpcls_subtable_lookup_generic;
     }
-
+    
+    subtable->priority = MIN_DPCLS_FLOW_PRI;
     cmap_insert(&cls->subtables_map, &subtable->cmap_node, mask->hash);
     /* Add the new subtable at the end of the pvector (with no hits yet) */
     pvector_insert(&cls->subtables, subtable, 0);
@@ -7771,7 +7798,6 @@ dpcls_find_subtable(struct dpcls *cls, const struct netdev_flow_key *mask, bool 
     return dpcls_create_subtable(cls, mask);
 }
 
-
 /* Periodically sort the dpcls subtable vectors according to hit counts */
 static void
 dpcls_sort_subtable_vector(struct dpcls *cls)
@@ -7781,7 +7807,7 @@ dpcls_sort_subtable_vector(struct dpcls *cls)
 
     PVECTOR_FOR_EACH (subtable, pvec) {
         pvector_change_priority(pvec, subtable,
-            subtable->is_appctl ? INT_MAX/2 : subtable->hit_cnt);
+            subtable->is_appctl ? (INT_MAX - (MAX_DPCLS_FLOW_PRI - subtable->priority)) : subtable->hit_cnt);
         subtable->hit_cnt = 0;
     }
     pvector_publish(pvec);
@@ -7863,11 +7889,19 @@ dp_netdev_pmd_try_optimize(struct dp_netdev_pmd_thread *pmd,
 /* Insert 'rule' into 'cls'. */
 static void
 dpcls_insert(struct dpcls *cls, struct dpcls_rule *rule,
-             const struct netdev_flow_key *mask, bool is_appctl)
+             const struct netdev_flow_key *mask, bool is_appctl, uint32_t priority)
 {
     struct dpcls_subtable *subtable = dpcls_find_subtable(cls, mask, is_appctl);
 
     subtable->is_appctl = is_appctl;
+    if (is_appctl) {
+        if (subtable->priority && subtable->priority != (priority - 1)) 
+            VLOG_WARN("subtable already exsit, priority is conflict, we will used priority before! subtable:%p, subtable->priority is %d, config priority is %d", subtable, subtable->priority, priority);
+        else {
+            subtable->priority = (priority > 0) ? priority -1 : 0 ;
+            VLOG_INFO("subtable:%p, subtable->priority is %d, priority is %d", subtable, subtable->priority, priority);
+        }
+    }
     /* Refer to subtable's mask, also for later removal. */
     rule->mask = &subtable->mask;
     cmap_insert(&subtable->rules, &rule->cmap_node, rule->flow.hash);

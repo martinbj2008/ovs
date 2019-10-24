@@ -529,7 +529,7 @@ int dpif_flow_put(struct dpif *, enum dpif_flow_put_flags,
                   const struct nlattr *key, size_t key_len,
                   const struct nlattr *mask, size_t mask_len,
                   const struct nlattr *actions, size_t actions_len,
-                  const ovs_u128 *ufid, const unsigned pmd_id,
+                  const ovs_u128 *ufid, const unsigned pmd_id, const uint32_t priority,
                   struct dpif_flow_stats *);
 int dpif_flow_del(struct dpif *,
                   const struct nlattr *key, size_t key_len,
@@ -587,6 +587,7 @@ struct dpif_flow {
     const struct nlattr *actions; /* Actions, as OVS_ACTION_ATTR_ */
     size_t actions_len;           /* 'actions' length in bytes. */
     ovs_u128 ufid;                /* Unique flow identifier. */
+    uint32_t priority;            /* dpcls flow priority, current only support 0-16, 1-16 is appctl priority, 0 is ofctl*/
     bool ufid_present;            /* True if 'ufid' was provided by datapath.*/
     unsigned pmd_id;              /* Datapath poll mode driver id. */
     struct dpif_flow_stats stats; /* Flow statistics. */
@@ -655,7 +656,7 @@ struct dpif_flow_put {
     size_t actions_len;             /* Length of 'actions' in bytes. */
     const ovs_u128 *ufid;           /* Optional unique flow identifier. */
     unsigned pmd_id;                /* Datapath poll mode driver id. */
-
+    uint32_t priority;
     /* Output. */
     struct dpif_flow_stats *stats;  /* Optional flow statistics. */
 };

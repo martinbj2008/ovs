@@ -84,7 +84,9 @@ struct dpcls_subtable {
     struct cmap rules;           /* Contains "struct dpcls_rule"s. */
     uint32_t hit_cnt;            /* Number of match hits in subtable in current
                                     optimization interval. */
-    uint8_t is_appctl;           /* exclusive and high prio for appctl rule*/
+    uint8_t is_appctl:1;           /* exclusive and high prio for appctl rule*/
+    uint8_t priority:4;			   /* priority for appctl rule*/
+    uint8_t res:3;				   /* reserved bit*/
     uint8_t pad;
 
     /* Miniflow fingerprint that the subtable matches on. The miniflow "bits"

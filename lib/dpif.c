@@ -972,7 +972,7 @@ dpif_probe_feature(struct dpif *dpif, const char *name,
     error = dpif_flow_put(dpif, DPIF_FP_CREATE | DPIF_FP_MODIFY | DPIF_FP_PROBE,
                           key->data, key->size, NULL, 0,
                           nl_actions, nl_actions_size,
-                          ufid, NON_PMD_CORE_ID, NULL);
+                          ufid, NON_PMD_CORE_ID, MIN_DPCLS_FLOW_PRI, NULL);
     if (error) {
         if (error != EINVAL && error != EOVERFLOW) {
             VLOG_WARN("%s: %s flow probe failed (%s)",
@@ -1033,7 +1033,7 @@ dpif_flow_put(struct dpif *dpif, enum dpif_flow_put_flags flags,
               const struct nlattr *key, size_t key_len,
               const struct nlattr *mask, size_t mask_len,
               const struct nlattr *actions, size_t actions_len,
-              const ovs_u128 *ufid, const unsigned pmd_id,
+              const ovs_u128 *ufid, const unsigned pmd_id, const uint32_t priority,
               struct dpif_flow_stats *stats)
 {
     struct dpif_op *opp;
@@ -1050,6 +1050,7 @@ dpif_flow_put(struct dpif *dpif, enum dpif_flow_put_flags flags,
     op.flow_put.ufid = ufid;
     op.flow_put.pmd_id = pmd_id;
     op.flow_put.stats = stats;
+    op.flow_put.priority = priority;
 
     opp = &op;
     dpif_operate(dpif, &opp, 1, DPIF_OFFLOAD_AUTO);

@@ -166,6 +166,8 @@ enum odp_key_fitness odp_nsh_hdr_from_attr(const struct nlattr *,
                                            struct nsh_hdr *, size_t);
 
 int odp_ufid_from_string(const char *s_, ovs_u128 *ufid);
+int
+odp_priority_from_string(const char *s_, uint32_t * ppriority);
 void odp_format_ufid(const ovs_u128 *ufid, struct ds *);
 
 void odp_flow_format(const struct nlattr *key, size_t key_len,
@@ -378,6 +380,12 @@ struct attr_len_tbl {
 #define ATTR_LEN_INVALID  -1
 #define ATTR_LEN_VARIABLE -2
 #define ATTR_LEN_NESTED   -3
+
+#define MIN_DPCLS_FLOW_PRI               0
+#define MIN_DPCTL_DPCLS_FLOW_PRI         1
+#define DEFAULT_DPCTL_DPCLS_FLOW_PRI     6
+#define MAX_DPCLS_FLOW_PRI               16
+#define APPCTL_UFID_GEN_MAGIC_CODE  0xFFFFFFFF
 
 extern const struct attr_len_tbl ovs_flow_key_attr_lens[OVS_KEY_ATTR_MAX + 1];
 #endif /* odp-util.h */
