@@ -873,6 +873,7 @@ conn_not_found(struct conntrack *ct, struct dp_packet *pkt,
         }
 
         if (nat_action_info) {
+            nc->rev_key.zone = nat_action_info->zone;
             nc->nat_info = xmemdup(nat_action_info, sizeof *nc->nat_info);
             nat_conn = xzalloc(sizeof *nat_conn);
 

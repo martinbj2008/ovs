@@ -82,6 +82,7 @@ struct nat_action_info_t {
     uint16_t min_port;
     uint16_t max_port;
     uint16_t nat_action;
+    uint16_t zone;
 };
 
 struct conntrack *conntrack_init(void);

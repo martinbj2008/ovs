@@ -790,6 +790,7 @@ static const struct nl_policy ovs_nat_policy[] = {
     [OVS_NAT_ATTR_PERSISTENT] = { .type = NL_A_FLAG, .optional = true, },
     [OVS_NAT_ATTR_PROTO_HASH] = { .type = NL_A_FLAG, .optional = true, },
     [OVS_NAT_ATTR_PROTO_RANDOM] = { .type = NL_A_FLAG, .optional = true, },
+    [OVS_NAT_ATTR_ZONE] = { .type = NL_A_U16, .optional = true, },
 };
 
 static void
@@ -800,6 +801,7 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
     ovs_be32 ip_min, ip_max;
     struct in6_addr ip6_min, ip6_max;
     uint16_t proto_min, proto_max;
+    uint16_t zone;
 
     if (!nl_parse_nested(attr, ovs_nat_policy, a, ARRAY_SIZE(a))) {
         ds_put_cstr(ds, "nat(error: nl_parse_nested() failed.)");
@@ -870,6 +872,9 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
         return;
     }
 
+    zone = a[OVS_NAT_ATTR_ZONE]
+        ? nl_attr_get_u16(a[OVS_NAT_ATTR_ZONE]) : 0;
+
     ds_put_cstr(ds, "nat");
     if (a[OVS_NAT_ATTR_SRC] || a[OVS_NAT_ATTR_DST]) {
         ds_put_char(ds, '(');
@@ -914,6 +919,9 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
         }
         if (a[OVS_NAT_ATTR_PROTO_RANDOM]) {
             ds_put_cstr(ds, "random,");
+        }
+        if (a[OVS_NAT_ATTR_ZONE]) {
+            ds_put_format(ds, "zone=%"PRIu16, zone);
         }
         ds_chomp(ds, ',');
         ds_put_char(ds, ')');
@@ -1755,6 +1763,7 @@ struct ct_nat_params {
     bool persistent;
     bool proto_hash;
     bool proto_random;
+    uint16_t zone;
 };
 
 static int
@@ -1848,6 +1857,9 @@ scan_ct_nat(const char *s, struct ct_nat_params *p)
                     p->proto_random = true;
                     continue;
                 }
+                if (ovs_scan_len(s, &n, "zone=%"SCNu16, &p->zone)) {
+                    continue;
+                }
                 return -EINVAL;
             }
 
@@ -1902,6 +1914,9 @@ nl_msg_put_ct_nat(struct ct_nat_params *p, struct ofpbuf *actions)
         }
         if (p->proto_random) {
             nl_msg_put_flag(actions, OVS_NAT_ATTR_PROTO_RANDOM);
+        }
+        if(p->zone) {
+            nl_msg_put_u16(actions, OVS_NAT_ATTR_ZONE, p->zone);
         }
     }
 out:

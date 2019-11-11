@@ -7500,6 +7500,10 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
                     case OVS_NAT_ATTR_PROTO_HASH:
                     case OVS_NAT_ATTR_PROTO_RANDOM:
                         break;
+                    case OVS_NAT_ATTR_ZONE:
+                        nat_action_info.zone =
+                            nl_attr_get_u16(b_nest);
+                        break;
                     case OVS_NAT_ATTR_UNSPEC:
                     case __OVS_NAT_ATTR_MAX:
                         OVS_NOT_REACHED();
