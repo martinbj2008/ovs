@@ -589,7 +589,9 @@ pat_packet(struct dp_packet *pkt, const struct conn *conn)
             struct udp_header *uh = dp_packet_l4(pkt);
             packet_set_udp_port(pkt, conn->rev_key.dst.port, uh->udp_dst);
         }
-    } else if (conn->nat_info->nat_action & NAT_ACTION_DST) {
+    }
+
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
         if (conn->key.nw_proto == IPPROTO_TCP) {
             struct tcp_header *th = dp_packet_l4(pkt);
             packet_set_tcp_port(pkt, th->tcp_src, conn->rev_key.src.port);
@@ -618,7 +620,9 @@ nat_packet(struct dp_packet *pkt, const struct conn *conn, bool related)
         if (!related) {
             pat_packet(pkt, conn);
         }
-    } else if (conn->nat_info->nat_action & NAT_ACTION_DST) {
+    }
+
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
         pkt->md.ct_state |= CS_DST_NAT;
         if (conn->key.dl_type == htons(ETH_TYPE_IP)) {
             struct ip_header *nh = dp_packet_l3(pkt);
@@ -647,7 +651,9 @@ un_pat_packet(struct dp_packet *pkt, const struct conn *conn)
             struct udp_header *uh = dp_packet_l4(pkt);
             packet_set_udp_port(pkt, uh->udp_src, conn->key.src.port);
         }
-    } else if (conn->nat_info->nat_action & NAT_ACTION_DST) {
+    }
+
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
         if (conn->key.nw_proto == IPPROTO_TCP) {
             struct tcp_header *th = dp_packet_l4(pkt);
             packet_set_tcp_port(pkt, conn->key.dst.port, th->tcp_dst);
@@ -671,7 +677,9 @@ reverse_pat_packet(struct dp_packet *pkt, const struct conn *conn)
             packet_set_udp_port(pkt, conn->key.src.port,
                                 uh_in->udp_dst);
         }
-    } else if (conn->nat_info->nat_action & NAT_ACTION_DST) {
+    }
+
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
         if (conn->key.nw_proto == IPPROTO_TCP) {
             struct tcp_header *th_in = dp_packet_l4(pkt);
             packet_set_tcp_port(pkt, th_in->tcp_src,
@@ -708,7 +716,9 @@ reverse_nat_packet(struct dp_packet *pkt, const struct conn *conn)
         if (conn->nat_info->nat_action & NAT_ACTION_SRC) {
             packet_set_ipv4_addr(pkt, &inner_l3->ip_src,
                                  conn->key.src.addr.ipv4);
-        } else if (conn->nat_info->nat_action & NAT_ACTION_DST) {
+        }
+
+        if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
             packet_set_ipv4_addr(pkt, &inner_l3->ip_dst,
                                  conn->key.dst.addr.ipv4);
         }
@@ -769,7 +779,9 @@ un_nat_packet(struct dp_packet *pkt, const struct conn *conn,
         } else {
             un_pat_packet(pkt, conn);
         }
-    } else if (conn->nat_info->nat_action & NAT_ACTION_DST) {
+    }
+
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
         pkt->md.ct_state |= CS_SRC_NAT;
         if (conn->key.dl_type == htons(ETH_TYPE_IP)) {
             struct ip_header *nh = dp_packet_l3(pkt);
@@ -2071,6 +2083,12 @@ nat_select_range_tuple(struct conntrack *ct, const struct conn *conn,
             if (pat_enabled) {
                 nat_conn->rev_key.src.port = htons(port);
             }
+        }
+        /*TODO: add specific algorithm to choose rs */
+        if (conn->nat_info->nat_action & NAT_ACTION_RS) {
+            int rs_index = hash % conn->nat_info->nat_rs_pack.count;
+            nat_conn->rev_key.src.addr.ipv4 = conn->nat_info->nat_rs_pack.rs[rs_index].ipv4;
+            nat_conn->rev_key.src.port = conn->nat_info->nat_rs_pack.rs[rs_index].port;
         }
 
         bool found = conn_lookup(ct, &nat_conn->rev_key, time_msec(), NULL,

@@ -7504,6 +7504,12 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
                         nat_action_info.zone =
                             nl_attr_get_u16(b_nest);
                         break;
+                    case OVS_NAT_ATTR_RS:
+                        memcpy(&nat_action_info.nat_rs_pack,
+                               nl_attr_get(b_nest),
+                               nl_attr_get_size(b_nest));
+                        nat_action_info.nat_action |= NAT_ACTION_RS;
+                        break;
                     case OVS_NAT_ATTR_UNSPEC:
                     case __OVS_NAT_ATTR_MAX:
                         OVS_NOT_REACHED();

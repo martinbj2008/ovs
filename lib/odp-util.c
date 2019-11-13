@@ -791,6 +791,17 @@ static const struct nl_policy ovs_nat_policy[] = {
     [OVS_NAT_ATTR_PROTO_HASH] = { .type = NL_A_FLAG, .optional = true, },
     [OVS_NAT_ATTR_PROTO_RANDOM] = { .type = NL_A_FLAG, .optional = true, },
     [OVS_NAT_ATTR_ZONE] = { .type = NL_A_U16, .optional = true, },
+    [OVS_NAT_ATTR_RS] = { .type = NL_A_UNSPEC, .optional = true, },
+};
+
+struct rs_t {
+    ovs_be32 ipv4;
+    ovs_be16 port;
+};
+
+struct nat_rs_pack_t {
+    uint16_t count;
+    struct rs_t rs[10];
 };
 
 static void
@@ -802,13 +813,14 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
     struct in6_addr ip6_min, ip6_max;
     uint16_t proto_min, proto_max;
     uint16_t zone;
+    struct nat_rs_pack_t *rs_pack;
 
     if (!nl_parse_nested(attr, ovs_nat_policy, a, ARRAY_SIZE(a))) {
         ds_put_cstr(ds, "nat(error: nl_parse_nested() failed.)");
         return;
     }
     /* If no type, then nothing else either. */
-    if (!(a[OVS_NAT_ATTR_SRC] || a[OVS_NAT_ATTR_DST])
+    if (!(a[OVS_NAT_ATTR_SRC] || a[OVS_NAT_ATTR_DST] || a[OVS_NAT_ATTR_RS])
         && (a[OVS_NAT_ATTR_IP_MIN] || a[OVS_NAT_ATTR_IP_MAX]
             || a[OVS_NAT_ATTR_PROTO_MIN] || a[OVS_NAT_ATTR_PROTO_MAX]
             || a[OVS_NAT_ATTR_PERSISTENT] || a[OVS_NAT_ATTR_PROTO_HASH]
@@ -875,8 +887,11 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
     zone = a[OVS_NAT_ATTR_ZONE]
         ? nl_attr_get_u16(a[OVS_NAT_ATTR_ZONE]) : 0;
 
+    rs_pack = a[OVS_NAT_ATTR_RS]
+        ? (struct nat_rs_pack_t *)nl_attr_get(a[OVS_NAT_ATTR_RS]) : NULL;
+
     ds_put_cstr(ds, "nat");
-    if (a[OVS_NAT_ATTR_SRC] || a[OVS_NAT_ATTR_DST]) {
+    if (a[OVS_NAT_ATTR_SRC] || a[OVS_NAT_ATTR_DST] || a[OVS_NAT_ATTR_RS]) {
         ds_put_char(ds, '(');
         if (a[OVS_NAT_ATTR_SRC]) {
             ds_put_cstr(ds, "src");
@@ -922,6 +937,18 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
         }
         if (a[OVS_NAT_ATTR_ZONE]) {
             ds_put_format(ds, "zone=%"PRIu16, zone);
+        }
+        ds_put_char(ds, ',');
+        if (a[OVS_NAT_ATTR_RS]) {
+            ds_put_format(ds, "rs(");
+            for (int i = 0; i < rs_pack->count; i++) {
+                ds_put_format(ds,  IP_FMT, IP_ARGS(rs_pack->rs[i].ipv4));
+                ds_put_format(ds, ":%"PRIu16, ntohs(rs_pack->rs[i].port));
+                if(i < rs_pack->count - 1) {
+                    ds_put_char(ds, ',');
+                }
+            }
+            ds_put_char(ds, ')');
         }
         ds_chomp(ds, ',');
         ds_put_char(ds, ')');
@@ -1764,6 +1791,7 @@ struct ct_nat_params {
     bool proto_hash;
     bool proto_random;
     uint16_t zone;
+    struct nat_rs_pack_t rs_pack;
 };
 
 static int
@@ -1810,6 +1838,41 @@ scan_ct_nat_range(const char *s, int *n, struct ct_nat_params *p)
 }
 
 static int
+scan_ct_nat_rs(const char *s_, int *n, struct ct_nat_params *p)
+{
+    const char *s = s_ + *n;
+    if (s[0] == '(') {
+        char *end;
+        int m = 1;
+        int end_n;
+
+        end = strchr(s, ')');
+        if (!end) {
+            return -EINVAL;
+        }
+        end_n = end - s;
+
+        uint16_t count = 0;
+        uint16_t port = 0;
+        while(m < end_n) {
+            m += strspn(s + m, delimiters);
+            if (ovs_scan_len(s, &m, IP_PORT_SCAN_FMT, IP_PORT_SCAN_ARGS(&p->rs_pack.rs[count].ipv4, &port))) {
+                p->rs_pack.rs[count].port = htons(port);
+                count++;
+                continue;
+            }
+            return -EINVAL;
+        }
+        p->rs_pack.count = count;
+        m++;
+        *n = *n + m;
+        return 0;
+    } else {
+        return -EINVAL;
+    }
+}
+
+static int
 scan_ct_nat(const char *s, struct ct_nat_params *p)
 {
     int n = 0;
@@ -1821,6 +1884,7 @@ scan_ct_nat(const char *s, struct ct_nat_params *p)
             char *end;
             int end_n;
 
+find_end:
             end = strchr(s + n, ')');
             if (!end) {
                 return -EINVAL;
@@ -1860,6 +1924,13 @@ scan_ct_nat(const char *s, struct ct_nat_params *p)
                 if (ovs_scan_len(s, &n, "zone=%"SCNu16, &p->zone)) {
                     continue;
                 }
+                if (ovs_scan_len(s, &n, "rs")) {
+                    int err = scan_ct_nat_rs(s, &n, p);
+                    if (err) {
+                        return err;
+                    }
+                    goto find_end;
+                }
                 return -EINVAL;
             }
 
@@ -1886,13 +1957,34 @@ nl_msg_put_ct_nat(struct ct_nat_params *p, struct ofpbuf *actions)
 {
     size_t start = nl_msg_start_nested(actions, OVS_CT_ATTR_NAT);
 
-    if (p->snat) {
-        nl_msg_put_flag(actions, OVS_NAT_ATTR_SRC);
-    } else if (p->dnat) {
-        nl_msg_put_flag(actions, OVS_NAT_ATTR_DST);
-    } else {
+    if (p->snat && p->dnat) {
         goto out;
     }
+
+    if (p->dnat && p->rs_pack.count) {
+        goto out;
+    }
+
+    if (!p->snat && !p->dnat && !p->rs_pack.count) {
+        goto out;
+    }
+
+    if (p->snat) {
+        nl_msg_put_flag(actions, OVS_NAT_ATTR_SRC);
+    }
+
+    if (p->dnat) {
+        nl_msg_put_flag(actions, OVS_NAT_ATTR_DST);
+    }
+
+    if (p->rs_pack.count) {
+        nl_msg_put_unspec(actions, OVS_NAT_ATTR_RS, &p->rs_pack, sizeof(p->rs_pack));
+    }
+
+    if(p->zone) {
+        nl_msg_put_u16(actions, OVS_NAT_ATTR_ZONE, p->zone);
+    }
+
     if (p->addr_len != 0) {
         nl_msg_put_unspec(actions, OVS_NAT_ATTR_IP_MIN, &p->addr_min,
                           p->addr_len);
@@ -1914,9 +2006,6 @@ nl_msg_put_ct_nat(struct ct_nat_params *p, struct ofpbuf *actions)
         }
         if (p->proto_random) {
             nl_msg_put_flag(actions, OVS_NAT_ATTR_PROTO_RANDOM);
-        }
-        if(p->zone) {
-            nl_msg_put_u16(actions, OVS_NAT_ATTR_ZONE, p->zone);
         }
     }
 out:

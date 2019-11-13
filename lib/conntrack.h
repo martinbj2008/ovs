@@ -74,6 +74,17 @@ enum nat_action_e {
     NAT_ACTION_SRC_PORT = 1 << 1,
     NAT_ACTION_DST = 1 << 2,
     NAT_ACTION_DST_PORT = 1 << 3,
+    NAT_ACTION_RS = 1 << 4,
+};
+
+struct rs_t {
+    ovs_be32 ipv4;
+    ovs_be16 port;
+};
+
+struct nat_rs_pack_t {
+    uint16_t count;
+    struct rs_t rs[10];
 };
 
 struct nat_action_info_t {
@@ -83,6 +94,7 @@ struct nat_action_info_t {
     uint16_t max_port;
     uint16_t nat_action;
     uint16_t zone;
+    struct nat_rs_pack_t nat_rs_pack;
 };
 
 struct conntrack *conntrack_init(void);
