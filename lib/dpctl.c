@@ -1279,7 +1279,7 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
         key_s += n;
         ufid_present = true;
     }
-    
+
     n = odp_priority_from_string(key_s, &priority);
     if (n < 0) {
         dpctl_error(dpctl_p, -n, "parsing flow priority");

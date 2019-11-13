@@ -1133,7 +1133,7 @@ pmd_info_show_perf(struct ds *reply,
         }
         free(time_str);
     }
-    
+
     dump_subtable_address(pmd);
 }
 
@@ -7770,7 +7770,7 @@ dpcls_create_subtable(struct dpcls *cls, const struct netdev_flow_key *mask)
     if (!subtable->lookup_func) {
         subtable->lookup_func = dpcls_subtable_lookup_generic;
     }
-    
+
     subtable->priority = MIN_DPCLS_FLOW_PRI;
     cmap_insert(&cls->subtables_map, &subtable->cmap_node, mask->hash);
     /* Add the new subtable at the end of the pvector (with no hits yet) */
@@ -7895,7 +7895,7 @@ dpcls_insert(struct dpcls *cls, struct dpcls_rule *rule,
 
     subtable->is_appctl = is_appctl;
     if (is_appctl) {
-        if (subtable->priority && subtable->priority != (priority - 1)) 
+        if (subtable->priority && subtable->priority != (priority - 1))
             VLOG_WARN("subtable already exsit, priority is conflict, we will used priority before! subtable:%p, subtable->priority is %d, config priority is %d", subtable, subtable->priority, priority);
         else {
             subtable->priority = (priority > 0) ? priority -1 : 0 ;
