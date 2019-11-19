@@ -36,7 +36,7 @@ static struct ovs_list expired OVS_GUARDED_BY(mutex)
 
 static uint32_t next_id OVS_GUARDED_BY(mutex) = 1; /* Possible next free id. */
 
-#define RECIRC_POOL_STATIC_IDS 1024
+#define RECIRC_POOL_STATIC_IDS_MIN 1024
 
 static void recirc_id_node_free(struct recirc_id_node *);
 
@@ -240,11 +240,11 @@ recirc_alloc_id__(const struct frozen_state *state, uint32_t hash)
     for (;;) {
         /* Claim the next ID.  The ID space should be sparse enough for the
            allocation to succeed at the first try.  We do skip the first
-           RECIRC_POOL_STATIC_IDS IDs on the later rounds, though, as some of
+           RECIRC_POOL_STATIC_IDS_MIN IDs on the later rounds, though, as some of
            the initial allocations may be for long term uses (like bonds). */
         node->id = next_id++;
         if (OVS_UNLIKELY(!node->id)) {
-            next_id = RECIRC_POOL_STATIC_IDS + 1;
+            next_id = RECIRC_POOL_STATIC_IDS_MIN + 1;
             node->id = next_id++;
         }
         /* Find if the id is free. */
