@@ -384,8 +384,14 @@ struct attr_len_tbl {
 #define MIN_DPCLS_FLOW_PRI               0
 #define MIN_DPCTL_DPCLS_FLOW_PRI         1
 #define DEFAULT_DPCTL_DPCLS_FLOW_PRI     6
+#define BLACKLIST_DPCLS_FLOW_PRI         14
+#define WHITELIST_DPCLS_FLOW_PRI         11
 #define MAX_DPCLS_FLOW_PRI               16
 #define APPCTL_UFID_GEN_MAGIC_CODE  0xFFFFFFFF
+#define BLACKLIST_SUBTABLE_PRI    (BLACKLIST_DPCLS_FLOW_PRI -1)
+#define WHITELIST_SUBTABLE_PRI    (WHITELIST_DPCLS_FLOW_PRI -1)
+#define SUBTABLE_PRIORITY(priority) (priority-1)
+#define MIN_SUBTABLE_PRI               0
 
 extern const struct attr_len_tbl ovs_flow_key_attr_lens[OVS_KEY_ATTR_MAX + 1];
 #endif /* odp-util.h */

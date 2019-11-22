@@ -1043,7 +1043,10 @@ format_dpif_flow(struct ds *ds, const struct dpif_flow *f, struct hmap *ports,
         ds_put_format(ds, ", dp:%s", f->attrs.dp_layer);
     }
     ds_put_cstr(ds, ", actions:");
-    format_odp_actions(ds, f->actions, f->actions_len, ports);
+    if (f->priority == WHITELIST_DPCLS_FLOW_PRI)
+        ds_put_cstr(ds, "accept");
+    else
+        format_odp_actions(ds, f->actions, f->actions_len, ports);
 }
 
 struct dump_types {
@@ -1354,10 +1357,22 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
     }
 
     ofpbuf_init(&actions, 0);
-    error = odp_actions_from_string(actions_s, NULL, &actions);
-    if (error) {
-        dpctl_error(dpctl_p, error, "parsing actions");
-        goto out_freeactions;
+    if (priority == WHITELIST_DPCLS_FLOW_PRI || priority == BLACKLIST_SUBTABLE_PRI) {
+        if (priority == WHITELIST_DPCLS_FLOW_PRI && strcasecmp(actions_s, "accept")) {
+            dpctl_error(dpctl_p, error, "Priority %d is whitelist, only support accept action", WHITELIST_SUBTABLE_PRI);
+            goto out_freeactions;
+        }
+
+        if (priority == BLACKLIST_DPCLS_FLOW_PRI && strcasecmp(actions_s, "drop")) {
+            dpctl_error(dpctl_p, error, "Priority %d is blacklist, only support drop action", BLACKLIST_SUBTABLE_PRI);
+            goto out_freeactions;
+        }
+    } else {
+        error = odp_actions_from_string(actions_s, NULL, &actions);
+        if (error) {
+            dpctl_error(dpctl_p, error, "parsing actions");
+            goto out_freeactions;
+        }
     }
 
     if (!ufid_present) {

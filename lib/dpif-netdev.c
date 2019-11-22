@@ -241,6 +241,8 @@ struct dpcls {
     struct pvector subtables;
 };
 
+
+
 /* Data structure to keep packet order till fastpath processing. */
 struct dp_packet_flow_map {
     struct dp_packet *packet;
@@ -254,11 +256,6 @@ static void dpcls_sort_subtable_vector(struct dpcls *);
 static void dpcls_insert(struct dpcls *, struct dpcls_rule *,
                          const struct netdev_flow_key *mask, bool is_appctl, uint32_t priority);
 static void dpcls_remove(struct dpcls *, struct dpcls_rule *);
-static bool dpcls_lookup(struct dpcls *cls,
-                         const struct netdev_flow_key *keys[],
-                         struct dpcls_rule **rules, size_t cnt,
-                         int *num_lookups_p);
-
 static inline bool is_dpctl_commands_need_generate_ufid(const ovs_u128* ufid);
 /* Set of supported meter flags */
 #define DP_SUPPORTED_METER_FLAGS_MASK \
@@ -849,6 +846,12 @@ static inline bool
 pmd_perf_metrics_enabled(const struct dp_netdev_pmd_thread *pmd);
 static void queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
                                   struct dp_netdev_flow *flow);
+static void whitelist_flow_init(struct dp_netdev_pmd_thread *pmd, odp_port_t in_port);
+static struct dp_netdev_flow * whitelist_drop_flow_lookup(struct dp_netdev_pmd_thread *pmd, odp_port_t in_port);
+static bool dpcls_lookup(struct dp_netdev_pmd_thread *pmd, struct dpcls *cls,
+                         const struct netdev_flow_key *keys[],
+                         struct dpcls_rule **rules, size_t cnt,
+                         int *num_lookups_p, bool is_fast_path);
 
 static void
 emc_cache_init(struct emc_cache *flow_cache)
@@ -1124,7 +1127,7 @@ pmd_info_show_perf(struct ds *reply,
         free(time_str);
     }
 
-    dump_subtable_address(pmd);
+//    dump_subtable_address(pmd);
 }
 
 static void
@@ -3085,7 +3088,7 @@ dp_netdev_pmd_lookup_flow(struct dp_netdev_pmd_thread *pmd,
 
     cls = dp_netdev_pmd_lookup_dpcls(pmd, in_port);
     if (OVS_LIKELY(cls)) {
-        dpcls_lookup(cls, &key, &rule, 1, lookup_num_p);
+        dpcls_lookup(pmd, cls, &key, &rule, 1, lookup_num_p, false);
         netdev_flow = dp_netdev_flow_cast(rule);
     }
     return netdev_flow;
@@ -3587,6 +3590,9 @@ dpif_netdev_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
                 put->stats->used = MAX(put->stats->used, pmd_stats.used);
                 put->stats->tcp_flags |= pmd_stats.tcp_flags;
             }
+
+            if (put->priority == WHITELIST_DPCLS_FLOW_PRI)
+                whitelist_flow_init(pmd, match.flow.in_port.odp_port);
         }
     } else {
         pmd = dp_netdev_get_pmd(dp, put->pmd_id);
@@ -6946,8 +6952,8 @@ fast_path_processing(struct dp_netdev_pmd_thread *pmd,
     /* Get the classifier for the in_port */
     cls = dp_netdev_pmd_lookup_dpcls(pmd, in_port);
     if (OVS_LIKELY(cls)) {
-        any_miss = !dpcls_lookup(cls, (const struct netdev_flow_key **)keys,
-                                rules, cnt, &lookup_cnt);
+        any_miss = !dpcls_lookup(pmd, cls, (const struct netdev_flow_key **)keys,
+                                rules, cnt, &lookup_cnt, true);
     } else {
         any_miss = true;
         memset(rules, 0, sizeof(rules));
@@ -7937,6 +7943,7 @@ dpcls_init(struct dpcls *cls)
 {
     cmap_init(&cls->subtables_map);
     pvector_init(&cls->subtables);
+    whitelist_flow_init(cls);
 }
 
 static void
@@ -7968,7 +7975,7 @@ dpcls_destroy(struct dpcls *cls)
 }
 
 static struct dpcls_subtable *
-dpcls_create_subtable(struct dpcls *cls, const struct netdev_flow_key *mask)
+dpcls_create_subtable(struct dpcls *cls, const struct netdev_flow_key *mask, bool is_appctl, uint32_t priority)
 {
     struct dpcls_subtable *subtable;
 
@@ -7997,7 +8004,13 @@ dpcls_create_subtable(struct dpcls *cls, const struct netdev_flow_key *mask)
         subtable->lookup_func = dpcls_subtable_lookup_generic;
     }
 
-    subtable->priority = MIN_DPCLS_FLOW_PRI;
+    subtable->is_appctl = is_appctl;
+    if (is_appctl)
+        subtable->priority = SUBTABLE_PRIORITY(priority);
+    else
+        subtable->priority = MIN_SUBTABLE_PRI;
+
+    VLOG_INFO("Create subtable : %p, priority: %d, is_appctl: %d, in_port:%d", subtable, priority, is_appctl, cls->in_port);
     cmap_insert(&cls->subtables_map, &subtable->cmap_node, mask->hash);
     /* Add the new subtable at the end of the pvector (with no hits yet) */
     pvector_insert(&cls->subtables, subtable, 0);
@@ -8009,19 +8022,21 @@ dpcls_create_subtable(struct dpcls *cls, const struct netdev_flow_key *mask)
 }
 
 static inline struct dpcls_subtable *
-dpcls_find_subtable(struct dpcls *cls, const struct netdev_flow_key *mask, bool is_appctl)
+dpcls_find_subtable(struct dpcls *cls, const struct netdev_flow_key *mask, bool is_appctl, uint32_t priority)
 {
     struct dpcls_subtable *subtable;
 
     CMAP_FOR_EACH_WITH_HASH (subtable, cmap_node, mask->hash,
                              &cls->subtables_map) {
-        if (subtable->is_appctl != is_appctl)
+        if (subtable->is_appctl != is_appctl || subtable->priority != priority)
             continue;
+
+
         if (netdev_flow_key_equal(&subtable->mask, mask)) {
             return subtable;
         }
     }
-    return dpcls_create_subtable(cls, mask);
+    return dpcls_create_subtable(cls, mask, is_appctl, priority);
 }
 
 /* Periodically sort the dpcls subtable vectors according to hit counts */
@@ -8117,8 +8132,9 @@ static void
 dpcls_insert(struct dpcls *cls, struct dpcls_rule *rule,
              const struct netdev_flow_key *mask, bool is_appctl, uint32_t priority)
 {
-    struct dpcls_subtable *subtable = dpcls_find_subtable(cls, mask, is_appctl);
+    struct dpcls_subtable *subtable = dpcls_find_subtable(cls, mask, is_appctl, priority);
 
+#if 0
     subtable->is_appctl = is_appctl;
     if (is_appctl) {
         if (subtable->priority && subtable->priority != (priority - 1))
@@ -8128,6 +8144,7 @@ dpcls_insert(struct dpcls *cls, struct dpcls_rule *rule,
             VLOG_INFO("subtable:%p, subtable->priority is %d, priority is %d", subtable, subtable->priority, priority);
         }
     }
+#endif
     /* Refer to subtable's mask, also for later removal. */
     rule->mask = &subtable->mask;
     cmap_insert(&subtable->rules, &rule->cmap_node, rule->flow.hash);
@@ -8217,9 +8234,9 @@ dpcls_rule_matches_key(const struct dpcls_rule *rule,
  *
  * Returns true if all miniflows found a corresponding rule. */
 static bool
-dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
+dpcls_lookup(struct dp_netdev_pmd_thread *pmd, struct dpcls *cls, const struct netdev_flow_key *keys[],
              struct dpcls_rule **rules, const size_t cnt,
-             int *num_lookups_p)
+             int *num_lookups_p, bool is_fast_path)
 {
     /* The received 'cnt' miniflows are the search-keys that will be processed
      * to find a matching entry into the available subtables.
@@ -8236,8 +8253,11 @@ dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
     memset(rules, 0, cnt * sizeof *rules);
 
     int lookups_match = 0, subtable_pos = 1;
-    uint32_t found_map;
-
+    uint32_t found_map = 0;
+    uint32_t wl_rematch_keys = 0;
+    int i = 0;
+    uint32_t last_priority = 0, key_map_store=0;
+    struct dp_netdev_flow *flow = NULL;
     /* The Datapath classifier - aka dpcls - is composed of subtables.
      * Subtables are dynamically created as needed when new rules are inserted.
      * Each subtable collects rules with matches on a specific subset of packet
@@ -8246,6 +8266,27 @@ dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
      * search-key, the search for that key can stop because the rules are
      * non-overlapping. */
     PVECTOR_FOR_EACH (subtable, &cls->subtables) {
+        if (last_priority == WHITELIST_SUBTABLE_PRI && subtable->priority < WHITELIST_SUBTABLE_PRI && is_fast_path) {
+            uint32_t drop_counts = count_1bits(keys_map);
+            if (drop_counts) {
+                flow = whitelist_drop_flow_lookup(pmd, cls->in_port);
+                if (flow) {
+                    ULLONG_FOR_EACH_1 (i, keys_map) { //after whitelist rule match, all mismatch pkt will be droped
+                        rules[i] = &flow->cr;
+                    }
+                }
+            }
+
+            wl_rematch_keys = keys_map ^ key_map_store;
+            keys_map = wl_rematch_keys;
+            if (!keys_map) {                   //all pkt will be drop , need not rematch low priority subtables
+                if (num_lookups_p) {
+                    *num_lookups_p = lookups_match;
+                }
+                return true;
+            }
+        }
+
         /* Call the subtable specific lookup function. */
         found_map = subtable->lookup_func(subtable, keys_map, keys, rules);
 
@@ -8253,9 +8294,19 @@ dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
          * estimates the "spread" of subtables looked at per matched packet. */
         uint32_t pkts_matched = count_1bits(found_map);
         lookups_match += pkts_matched * subtable_pos;
+        if (subtable->priority == WHITELIST_SUBTABLE_PRI && last_priority != WHITELIST_SUBTABLE_PRI && is_fast_path) {
+            key_map_store = keys_map;
+        }
 
+        last_priority = subtable->priority;
+        if (last_priority == WHITELIST_SUBTABLE_PRI && is_fast_path) {
+           keys_map &= ~found_map;
+           subtable_pos ++;
+           continue;
+        }
         /* Clear the found rules, and return early if all packets are found. */
         keys_map &= ~found_map;
+
         if (!keys_map) {
             if (num_lookups_p) {
                 *num_lookups_p = lookups_match;
@@ -8269,4 +8320,50 @@ dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
         *num_lookups_p = lookups_match;
     }
     return false;
+}
+
+static struct dp_netdev_flow * whitelist_drop_flow_lookup(struct dp_netdev_pmd_thread *pmd, odp_port_t in_port) {
+    struct dp_netdev_flow *netdev_flow = NULL;
+    struct flow flow;
+    ovs_u128 ufid;
+
+    memset(&flow, 0, sizeof(struct flow));
+    flow.dl_type=0x8888;
+    flow.in_port.odp_port = in_port;
+    dpif_flow_hash_dpctl_commands(NULL, &flow, sizeof flow, &ufid);
+
+    CMAP_FOR_EACH_WITH_HASH (netdev_flow, node, dp_netdev_flow_hash(&ufid), &pmd->flow_table) {
+        if (ovs_u128_equals(netdev_flow->ufid, ufid)) {
+            return netdev_flow;
+        }
+    }
+
+    return NULL;
+}
+
+static void whitelist_flow_init(struct dp_netdev_pmd_thread *pmd, odp_port_t in_port) {
+    struct netdev_flow_key mask, key;
+    struct flow flow;
+    struct match match;
+    ovs_u128 ufid;
+
+    if (!whitelist_drop_flow_lookup(pmd, in_port)) {
+        //init match , flow,
+        memset(&flow, 0, sizeof(struct flow));
+        memset(&match, 0, sizeof(struct match));
+        flow.dl_type=0x8888;
+        flow.in_port.odp_port = in_port;
+        match.flow=flow;
+        //flow_wildcards_init_for_packet(&match.wc, &flow);
+        match.wc.masks.in_port.odp_port = ODPP_NONE;
+        match.wc.masks.dl_type = 0xFFFF;
+
+        dpif_flow_hash_dpctl_commands(NULL, &match.flow, sizeof match.flow, &ufid);
+        netdev_flow_mask_init(&mask, &match);
+        netdev_flow_key_init_masked(&key, &match.flow, &mask);
+
+        ovs_mutex_lock(&pmd->flow_mutex);
+        dp_netdev_flow_add(pmd, &match, &ufid, 1, NULL, 0); //whitelist drop priority is 1
+        ovs_mutex_unlock(&pmd->flow_mutex);
+    }
 }
