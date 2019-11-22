@@ -7510,6 +7510,11 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
                                nl_attr_get_size(b_nest));
                         nat_action_info.nat_action |= NAT_ACTION_RS;
                         break;
+                    case OVS_NAT_ATTR_POOL:
+                        memcpy(nat_action_info.pool_name, nl_attr_get(b_nest),
+                                nl_attr_get_size(b_nest));
+                        nat_action_info.nat_action |= NAT_ACTION_POOL;
+                        break;
                     case OVS_NAT_ATTR_UNSPEC:
                     case __OVS_NAT_ATTR_MAX:
                         OVS_NOT_REACHED();
@@ -7682,6 +7687,27 @@ dpif_netdev_ct_get_nconns(struct dpif *dpif, uint32_t *nconns)
 }
 
 static int
+dpif_netdev_ct_add_rs_pool(struct dpif *dpif, struct ct_rs_pool_t *rs_pool)
+{
+    struct dp_netdev *dp = get_dp_netdev(dpif);
+    return conntrack_add_rs_pool(dp->conntrack, rs_pool);
+}
+
+static int
+dpif_netdev_ct_del_rs_pool(struct dpif *dpif, char *pool_name)
+{
+    struct dp_netdev *dp = get_dp_netdev(dpif);
+    return conntrack_del_rs_pool(dp->conntrack, pool_name);
+}
+
+static int
+dpif_netdev_ct_dump_rs_pool(struct dpif *dpif, struct ovs_list  *ct_rs_pools)
+{
+    struct dp_netdev *dp = get_dp_netdev(dpif);
+    return conntrack_dump_rs_pool(dp->conntrack, ct_rs_pools);
+}
+
+static int
 dpif_netdev_ipf_set_enabled(struct dpif *dpif, bool v6, bool enable)
 {
     struct dp_netdev *dp = get_dp_netdev(dpif);
@@ -7788,6 +7814,9 @@ const struct dpif_class dpif_netdev_class = {
     NULL,                       /* ct_set_limits */
     NULL,                       /* ct_get_limits */
     NULL,                       /* ct_del_limits */
+    dpif_netdev_ct_add_rs_pool,
+    dpif_netdev_ct_del_rs_pool,
+    dpif_netdev_ct_dump_rs_pool,
     dpif_netdev_ipf_set_enabled,
     dpif_netdev_ipf_set_min_frag,
     dpif_netdev_ipf_set_max_nfrags,

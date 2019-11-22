@@ -21,9 +21,12 @@
 
 #include "ct-dpif.h"
 #include "openvswitch/ofp-parse.h"
+#include "util.h"
 #include "openvswitch/vlog.h"
 
 VLOG_DEFINE_THIS_MODULE(ct_dpif);
+
+static const char *delimiters = ", \t\r\n";
 
 /* Declarations for conntrack entry formatting. */
 struct flags {
@@ -760,4 +763,96 @@ ct_dpif_format_zone_limits(uint32_t default_limit,
         ds_put_format(ds, ",limit=%"PRIu32, zone_limit->limit);
         ds_put_format(ds, ",count=%"PRIu32, zone_limit->count);
     }
+}
+
+int
+ct_dpif_add_rs_pool(struct dpif *dpif, struct ct_rs_pool_t *rs_pool)
+{
+    return (dpif->dpif_class->ct_add_rs_pool
+            ? dpif->dpif_class->ct_add_rs_pool(dpif, rs_pool)
+            : EOPNOTSUPP);
+}
+
+int
+ct_dpif_del_rs_pool(struct dpif *dpif, char *pool_name)
+{
+    return (dpif->dpif_class->ct_del_rs_pool
+            ? dpif->dpif_class->ct_del_rs_pool(dpif, pool_name)
+            : EOPNOTSUPP);
+}
+
+int
+ct_dpif_dump_rs_pool(struct dpif *dpif, struct ovs_list  *ct_rs_pools)
+{
+    return (dpif->dpif_class->ct_dump_rs_pool
+            ? dpif->dpif_class->ct_dump_rs_pool(dpif, ct_rs_pools)
+            : EOPNOTSUPP);
+}
+
+int
+ct_dpif_parse_rs_pool(struct ct_rs_pool_t *rs_pool, const char *s_) {
+    int n = 0;
+    memset(rs_pool, 0, sizeof *rs_pool);
+    const char *s = s_;
+    if (ovs_scan(s, "name(%n", &n)) {
+        s += n;
+        if(ovs_scan(s, "%[^)]%n", rs_pool->pool_name, &n)) {
+            if (n > 32) {
+                VLOG_WARN("pool name length should not be larger than 32");
+                return EINVAL;
+            }
+            s += n;
+            if (ovs_scan(s, ")")) {
+                s++;
+            } else {
+                return EINVAL;
+            }
+            s += strspn(s, delimiters);
+            if (ovs_scan(s, "rs(%n", &n)) {
+                s += n;
+                char *end = strchr(s, ')');
+                if (!end) {
+                    return EINVAL;
+                }
+                uint16_t count = 0;
+                uint16_t port = 0;
+                while(s < end) {
+                    s += strspn(s, delimiters);
+                    if(ovs_scan(s, IP_PORT_SCAN_FMT"%n", IP_PORT_SCAN_ARGS(&rs_pool->rs[count].ipv4, &port), &n)) {
+                        rs_pool->rs[count].port = htons(port);
+                        count++;
+                        s += n;
+                        continue;
+                    }
+                    return EINVAL;
+                }
+                rs_pool->count = count;
+                s++;
+                return 0;
+            }
+        } else {
+            return EINVAL;
+        }
+
+    }
+    return EINVAL;
+}
+
+int
+ct_dpif_format_rs_pool_pack(const struct ovs_list *rs_pools, struct ds *ds)
+{
+    const struct ct_rs_pool_t *ct_rs_pool;
+    LIST_FOR_EACH(ct_rs_pool, node, rs_pools) {
+        ds_put_format(ds,"pool(name(%s),rs(", ct_rs_pool->pool_name);
+        for(int i = 0; i < ct_rs_pool->count; i++) {
+            ds_put_format(ds, IP_FMT, IP_ARGS(ct_rs_pool->rs[i].ipv4));
+            ds_put_format(ds,":%"PRIu16, ntohs(ct_rs_pool->rs[i].port));
+            ds_put_char(ds, ',');
+        }
+        ds_chomp(ds, ',');
+        ds_put_cstr(ds, "))");
+        ds_put_char(ds, ',');
+    }
+    ds_chomp(ds, ',');
+    return 0;
 }

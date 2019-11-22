@@ -80,6 +80,7 @@ dpif_flow_dump_thread_init(struct dpif_flow_dump_thread *thread,
 struct ct_dpif_dump_state;
 struct ct_dpif_entry;
 struct ct_dpif_tuple;
+struct ct_rs_pool_t;
 
 /* 'dpif_ipf_proto_status' and 'dpif_ipf_status' are presently in
  * sync with 'ipf_proto_status' and 'ipf_status', but more
@@ -497,6 +498,10 @@ struct dpif_class {
     /* Deletes per zone limit of all zones specified in 'zone_limits', a
      * list of 'struct ct_dpif_zone_limit' entries. */
     int (*ct_del_limits)(struct dpif *, const struct ovs_list *zone_limits);
+
+    int (*ct_add_rs_pool)(struct dpif *, struct ct_rs_pool_t *);
+    int (*ct_del_rs_pool)(struct dpif *, char *pool_name);
+    int (*ct_dump_rs_pool)(struct dpif *, struct ovs_list *);
 
     /* IP Fragmentation. */
 

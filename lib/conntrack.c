@@ -314,6 +314,9 @@ conntrack_init(void)
     ct->clean_thread = ovs_thread_create("ct_clean", clean_thread_main, ct);
     ct->ipf = ipf_init();
 
+    ct->pool_count = 0;
+    ovs_list_init(&ct->rs_pools);
+
     return ct;
 }
 
@@ -496,6 +499,18 @@ write_ct_md(struct dp_packet *pkt, uint16_t zone, const struct conn *conn,
     }
 }
 
+static inline struct ct_rs_pool_t*
+get_ct_rs_pool(struct conntrack *ct, char *pool_name)
+{
+    struct ct_rs_pool_t *rs_pool = NULL;
+    LIST_FOR_EACH(rs_pool, node, &ct->rs_pools) {
+        if (!strcmp(rs_pool->pool_name, pool_name)) {
+            break;
+        }
+    }
+    return rs_pool;
+}
+
 static uint8_t
 get_ip_proto(const struct dp_packet *pkt)
 {
@@ -591,7 +606,7 @@ pat_packet(struct dp_packet *pkt, const struct conn *conn)
         }
     }
 
-    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS | NAT_ACTION_POOL)) {
         if (conn->key.nw_proto == IPPROTO_TCP) {
             struct tcp_header *th = dp_packet_l4(pkt);
             packet_set_tcp_port(pkt, th->tcp_src, conn->rev_key.src.port);
@@ -622,7 +637,7 @@ nat_packet(struct dp_packet *pkt, const struct conn *conn, bool related)
         }
     }
 
-    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS | NAT_ACTION_POOL)) {
         pkt->md.ct_state |= CS_DST_NAT;
         if (conn->key.dl_type == htons(ETH_TYPE_IP)) {
             struct ip_header *nh = dp_packet_l3(pkt);
@@ -653,7 +668,7 @@ un_pat_packet(struct dp_packet *pkt, const struct conn *conn)
         }
     }
 
-    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS | NAT_ACTION_POOL)) {
         if (conn->key.nw_proto == IPPROTO_TCP) {
             struct tcp_header *th = dp_packet_l4(pkt);
             packet_set_tcp_port(pkt, conn->key.dst.port, th->tcp_dst);
@@ -679,7 +694,7 @@ reverse_pat_packet(struct dp_packet *pkt, const struct conn *conn)
         }
     }
 
-    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS | NAT_ACTION_POOL)) {
         if (conn->key.nw_proto == IPPROTO_TCP) {
             struct tcp_header *th_in = dp_packet_l4(pkt);
             packet_set_tcp_port(pkt, th_in->tcp_src,
@@ -718,7 +733,7 @@ reverse_nat_packet(struct dp_packet *pkt, const struct conn *conn)
                                  conn->key.src.addr.ipv4);
         }
 
-        if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
+        if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS | NAT_ACTION_POOL)) {
             packet_set_ipv4_addr(pkt, &inner_l3->ip_dst,
                                  conn->key.dst.addr.ipv4);
         }
@@ -781,7 +796,7 @@ un_nat_packet(struct dp_packet *pkt, const struct conn *conn,
         }
     }
 
-    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS)) {
+    if (conn->nat_info->nat_action & (NAT_ACTION_DST | NAT_ACTION_RS | NAT_ACTION_POOL)) {
         pkt->md.ct_state |= CS_SRC_NAT;
         if (conn->key.dl_type == htons(ETH_TYPE_IP)) {
             struct ip_header *nh = dp_packet_l3(pkt);
@@ -2089,6 +2104,15 @@ nat_select_range_tuple(struct conntrack *ct, const struct conn *conn,
             int rs_index = hash % conn->nat_info->nat_rs_pack.count;
             nat_conn->rev_key.src.addr.ipv4 = conn->nat_info->nat_rs_pack.rs[rs_index].ipv4;
             nat_conn->rev_key.src.port = conn->nat_info->nat_rs_pack.rs[rs_index].port;
+        } else if (conn->nat_info->nat_action & NAT_ACTION_POOL) {
+            struct ct_rs_pool_t *rs_pool = get_ct_rs_pool(ct, conn->nat_info->pool_name);
+            if(rs_pool) {
+                int rs_index = hash % rs_pool->count;
+                nat_conn->rev_key.src.addr.ipv4 = rs_pool->rs[rs_index].ipv4;
+                nat_conn->rev_key.src.port = rs_pool->rs[rs_index].port;
+            } else {
+                VLOG_WARN("rs pool: %s is not found", conn->nat_info->pool_name);
+            }
         }
 
         bool found = conn_lookup(ct, &nat_conn->rev_key, time_msec(), NULL,
@@ -2423,6 +2447,38 @@ int
 conntrack_get_nconns(struct conntrack *ct, uint32_t *nconns)
 {
     *nconns = atomic_count_get(&ct->n_conn);
+    return 0;
+}
+
+int
+conntrack_add_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *rs_pool)
+{
+    ovs_list_push_front(&ct->rs_pools, &rs_pool->node);
+    ct->pool_count++;
+    return 0;
+}
+
+int
+conntrack_del_rs_pool(struct conntrack *ct, char *pool_name)
+{
+    struct ct_rs_pool_t *rs_pool = get_ct_rs_pool(ct, pool_name);
+    if (rs_pool) {
+        ovs_list_remove(&rs_pool->node);
+        /*FIXME: free pool node from ovs list*/
+        free(rs_pool);
+    }
+    return 0;
+}
+
+int
+conntrack_dump_rs_pool(struct conntrack *ct, struct ovs_list *rs_pools)
+{
+    const struct ct_rs_pool_t *__rs_pool = NULL;
+    LIST_FOR_EACH(__rs_pool, node, &ct->rs_pools) {
+        struct ct_rs_pool_t *rs_pool = xmalloc(sizeof *__rs_pool);
+        memcpy(rs_pool, __rs_pool, sizeof *__rs_pool);
+        ovs_list_push_front(rs_pools, &rs_pool->node);
+    }
     return 0;
 }
 

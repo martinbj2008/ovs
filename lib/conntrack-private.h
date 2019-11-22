@@ -173,6 +173,10 @@ struct conntrack {
 
     /* Fragmentation handling context. */
     struct ipf *ipf;
+
+    /*rs pool for full nat*/
+    uint16_t pool_count;
+    struct ovs_list rs_pools;
 };
 
 /* Lock acquisition order:

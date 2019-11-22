@@ -63,6 +63,7 @@
 struct dp_packet_batch;
 
 struct conntrack;
+struct ct_rs_pool_t;
 
 union ct_addr {
     ovs_be32 ipv4;
@@ -75,6 +76,7 @@ enum nat_action_e {
     NAT_ACTION_DST = 1 << 2,
     NAT_ACTION_DST_PORT = 1 << 3,
     NAT_ACTION_RS = 1 << 4,
+    NAT_ACTION_POOL = 1 << 5,
 };
 
 struct rs_t {
@@ -94,6 +96,7 @@ struct nat_action_info_t {
     uint16_t max_port;
     uint16_t nat_action;
     uint16_t zone;
+    char pool_name[33];
     struct nat_rs_pack_t nat_rs_pack;
 };
 
@@ -131,6 +134,11 @@ int conntrack_flush_tuple(struct conntrack *, const struct ct_dpif_tuple *,
 int conntrack_set_maxconns(struct conntrack *ct, uint32_t maxconns);
 int conntrack_get_maxconns(struct conntrack *ct, uint32_t *maxconns);
 int conntrack_get_nconns(struct conntrack *ct, uint32_t *nconns);
+
+int conntrack_add_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *);
+int conntrack_del_rs_pool(struct conntrack *ct, char *pool_name);
+int conntrack_dump_rs_pool(struct conntrack *ct, struct ovs_list *);
+
 struct ipf *conntrack_ipf_ctx(struct conntrack *ct);
 
 #endif /* conntrack.h */

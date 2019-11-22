@@ -860,6 +860,7 @@ enum ovs_nat_attr {
 	OVS_NAT_ATTR_PROTO_RANDOM,
     OVS_NAT_ATTR_ZONE,
     OVS_NAT_ATTR_RS,
+    OVS_NAT_ATTR_POOL,
 	__OVS_NAT_ATTR_MAX,
 };
 

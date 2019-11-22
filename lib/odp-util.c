@@ -792,6 +792,7 @@ static const struct nl_policy ovs_nat_policy[] = {
     [OVS_NAT_ATTR_PROTO_RANDOM] = { .type = NL_A_FLAG, .optional = true, },
     [OVS_NAT_ATTR_ZONE] = { .type = NL_A_U16, .optional = true, },
     [OVS_NAT_ATTR_RS] = { .type = NL_A_UNSPEC, .optional = true, },
+    [OVS_NAT_ATTR_POOL] = { .type = NL_A_UNSPEC, .optional = true, },
 };
 
 struct rs_t {
@@ -814,13 +815,14 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
     uint16_t proto_min, proto_max;
     uint16_t zone;
     struct nat_rs_pack_t *rs_pack;
+    char *pool_name;
 
     if (!nl_parse_nested(attr, ovs_nat_policy, a, ARRAY_SIZE(a))) {
         ds_put_cstr(ds, "nat(error: nl_parse_nested() failed.)");
         return;
     }
     /* If no type, then nothing else either. */
-    if (!(a[OVS_NAT_ATTR_SRC] || a[OVS_NAT_ATTR_DST] || a[OVS_NAT_ATTR_RS])
+    if (!(a[OVS_NAT_ATTR_SRC] || a[OVS_NAT_ATTR_DST] || a[OVS_NAT_ATTR_RS] || a[OVS_NAT_ATTR_POOL])
         && (a[OVS_NAT_ATTR_IP_MIN] || a[OVS_NAT_ATTR_IP_MAX]
             || a[OVS_NAT_ATTR_PROTO_MIN] || a[OVS_NAT_ATTR_PROTO_MAX]
             || a[OVS_NAT_ATTR_PERSISTENT] || a[OVS_NAT_ATTR_PROTO_HASH]
@@ -890,6 +892,9 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
     rs_pack = a[OVS_NAT_ATTR_RS]
         ? (struct nat_rs_pack_t *)nl_attr_get(a[OVS_NAT_ATTR_RS]) : NULL;
 
+    pool_name = a[OVS_NAT_ATTR_POOL]
+        ? (char *)nl_attr_get(a[OVS_NAT_ATTR_POOL]) : NULL;
+
     ds_put_cstr(ds, "nat");
     if (a[OVS_NAT_ATTR_SRC] || a[OVS_NAT_ATTR_DST] || a[OVS_NAT_ATTR_RS]) {
         ds_put_char(ds, '(');
@@ -937,8 +942,8 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
         }
         if (a[OVS_NAT_ATTR_ZONE]) {
             ds_put_format(ds, "zone=%"PRIu16, zone);
+            ds_put_char(ds, ',');
         }
-        ds_put_char(ds, ',');
         if (a[OVS_NAT_ATTR_RS]) {
             ds_put_format(ds, "rs(");
             for (int i = 0; i < rs_pack->count; i++) {
@@ -949,6 +954,12 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
                 }
             }
             ds_put_char(ds, ')');
+            ds_put_char(ds, ',');
+        }
+        if (a[OVS_NAT_ATTR_POOL]) {
+            ds_put_cstr(ds, "pool(");
+            ds_put_format(ds, "%s", pool_name);
+            ds_put_cstr(ds, "),");
         }
         ds_chomp(ds, ',');
         ds_put_char(ds, ')');
@@ -1791,6 +1802,7 @@ struct ct_nat_params {
     bool proto_hash;
     bool proto_random;
     uint16_t zone;
+    char pool_name[33];
     struct nat_rs_pack_t rs_pack;
 };
 
@@ -1924,6 +1936,15 @@ find_end:
                 if (ovs_scan_len(s, &n, "zone=%"SCNu16, &p->zone)) {
                     continue;
                 }
+                if(ovs_scan_len(s, &n, "pool(")) {
+                    if (!ovs_scan_len(s, &n, "%[^)]", p->pool_name)) {
+                        return -EINVAL;
+                    }
+                    if (!ovs_scan_len(s, &n, ")")) {
+                        return -EINVAL;
+                    }
+                    goto find_end;
+                }
                 if (ovs_scan_len(s, &n, "rs")) {
                     int err = scan_ct_nat_rs(s, &n, p);
                     if (err) {
@@ -1935,6 +1956,9 @@ find_end:
             }
 
             if (p->snat && p->dnat) {
+                return -EINVAL;
+            }
+            if(p->rs_pack.count > 0 && strlen(p->pool_name) > 0) {
                 return -EINVAL;
             }
             if ((p->addr_len != 0 &&
@@ -1979,6 +2003,10 @@ nl_msg_put_ct_nat(struct ct_nat_params *p, struct ofpbuf *actions)
 
     if (p->rs_pack.count) {
         nl_msg_put_unspec(actions, OVS_NAT_ATTR_RS, &p->rs_pack, sizeof(p->rs_pack));
+    }
+
+    if (strlen(p->pool_name) > 0) {
+        nl_msg_put_unspec(actions, OVS_NAT_ATTR_POOL, p->pool_name, sizeof p->pool_name);
     }
 
     if(p->zone) {
@@ -2032,6 +2060,7 @@ parse_conntrack_action(const char *s_, struct ofpbuf *actions)
             ovs_u128 mask;
         } ct_label;
         struct ct_nat_params nat_params;
+        memset(&nat_params, 0, sizeof(nat_params));
         bool have_nat = false;
         size_t start;
         char *end;

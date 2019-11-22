@@ -51,6 +51,9 @@
 #include "util.h"
 #include "openvswitch/ofp-flow.h"
 #include "openvswitch/ofp-port.h"
+#include "openvswitch/vlog.h"
+
+VLOG_DEFINE_THIS_MODULE(dpctl);
 
 #include "qos.h"
 
@@ -2179,6 +2182,103 @@ out:
 }
 
 static int
+dpctl_ct_add_rs_pool(int argc, const char *argv[],
+                      struct dpctl_params *dpctl_p)
+{
+    struct dpif *dpif;
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    int error = opt_dpif_open(argc, argv, dpctl_p, 3, &dpif);
+    if (!error) {
+        struct ct_rs_pool_t *rs_pool = xmalloc(sizeof(struct ct_rs_pool_t));
+        memset(rs_pool, 0, sizeof *rs_pool);
+        error = ct_dpif_parse_rs_pool(rs_pool, argv[argc-1]);
+        if (!error) {
+            error = ct_dpif_add_rs_pool(dpif, rs_pool);
+
+            if (!error) {
+                goto out;
+            } else {
+                ds_put_format(&ds, "failed to add rs pool");
+                goto error;
+            }
+        } else {
+            ds_put_format(&ds, "failed to parse rs pool");
+            goto error;
+        }
+    }
+error:
+    dpctl_error(dpctl_p, error, "%s", ds_cstr(&ds));
+out:
+    ds_destroy(&ds);
+    dpif_close(dpif);
+    return error;
+}
+
+static int
+dpctl_ct_del_rs_pool(int argc, const char *argv[],
+                      struct dpctl_params *dpctl_p)
+{
+    struct dpif *dpif;
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    int error = opt_dpif_open(argc, argv, dpctl_p, 3, &dpif);
+    if (argc < 2) {
+        ds_put_format(&ds, "pool name should be provided");
+        goto error;
+    }
+    if (!error) {
+        char name[33] = {0};
+        ovs_scan(argv[argc-1], "name(%[^)]", name);
+        error = ct_dpif_del_rs_pool(dpif, name);
+        if (!error) {
+            goto out;
+        } else {
+            ds_put_format(&ds, "failed to delete rs pool");
+            goto error;
+        }
+    }
+error:
+    dpctl_error(dpctl_p, error, "%s", ds_cstr(&ds));
+out:
+    ds_destroy(&ds);
+    dpif_close(dpif);
+    return error;
+}
+
+static int
+dpctl_ct_dump_rs_pool(int argc, const char *argv[],
+                      struct dpctl_params *dpctl_p)
+{
+    struct dpif *dpif;
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    int error = opt_dpif_open(argc, argv, dpctl_p, 2, &dpif);
+    if (!error) {
+        struct ovs_list ct_rs_pools = OVS_LIST_INITIALIZER(&ct_rs_pools);
+        error = ct_dpif_dump_rs_pool(dpif, &ct_rs_pools);
+        if (!error) {
+            error = ct_dpif_format_rs_pool_pack(&ct_rs_pools, &ds);
+
+            if (!error) {
+                dpctl_print(dpctl_p, "%s\n", ds_cstr(&ds));
+                goto out;
+            } else {
+                ds_put_format(&ds, "failed to format rs pool");
+                goto error;
+            }
+        } else {
+            ds_put_format(&ds, "failed to dump rs pool");
+            goto error;
+        }
+    }
+error:
+    dpctl_error(dpctl_p, error, "%s", ds_cstr(&ds));
+out:
+    /*TODO: free ovs list*/
+    ds_destroy(&ds);
+    dpif_close(dpif);
+    return error;
+}
+
+static int
 ipf_set_enabled__(int argc, const char *argv[], struct dpctl_params *dpctl_p,
                   bool enabled)
 {
@@ -2695,6 +2795,12 @@ static const struct dpctl_command all_commands[] = {
     { "ct-del-limits", "[dp] zone=N1[,N2]...", 1, 2, dpctl_ct_del_limits,
         DP_RO },
     { "ct-get-limits", "[dp] [zone=N1[,N2]...]", 0, 2, dpctl_ct_get_limits,
+        DP_RO },
+    { "ct-add-pool", "[dp] rs-pool", 1, 2, dpctl_ct_add_rs_pool,
+        DP_RW },
+    { "ct-del-pool", "[dp] pool-name", 1, 2, dpctl_ct_del_rs_pool,
+        DP_RW },
+    { "ct-dump-pool", "[dp] rs-pool", 0, 1, dpctl_ct_dump_rs_pool,
         DP_RO },
     { "ipf-set-enabled", "[dp] v4|v6", 1, 2, dpctl_ipf_set_enabled, DP_RW },
     { "ipf-set-disabled", "[dp] v4|v6", 1, 2, dpctl_ipf_set_disabled, DP_RW },

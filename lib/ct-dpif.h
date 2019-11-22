@@ -225,6 +225,18 @@ struct ct_dpif_zone_limit {
     struct ovs_list node;
 };
 
+struct ct_rs_t {
+    ovs_be32 ipv4;
+    ovs_be16 port;
+};
+
+struct ct_rs_pool_t {
+    uint16_t count;
+    char pool_name[33];
+    struct ct_rs_t rs[10];
+    struct ovs_list node;
+};
+
 int ct_dpif_dump_start(struct dpif *, struct ct_dpif_dump_state **,
                        const uint16_t *zone, int *);
 int ct_dpif_dump_next(struct ct_dpif_dump_state *, struct ct_dpif_entry *);
@@ -261,5 +273,11 @@ bool ct_dpif_parse_zone_limit_tuple(const char *s, uint16_t *pzone,
                                     uint32_t *plimit, struct ds *);
 void ct_dpif_format_zone_limits(uint32_t default_limit,
                                 const struct ovs_list *, struct ds *);
+
+int ct_dpif_add_rs_pool(struct dpif *dpif, struct ct_rs_pool_t *);
+int ct_dpif_del_rs_pool(struct dpif *dpif, char *pool_name);
+int ct_dpif_dump_rs_pool(struct dpif *dpif, struct ovs_list  *ct_rs_pools);
+int ct_dpif_parse_rs_pool(struct ct_rs_pool_t *, const char *s);
+int ct_dpif_format_rs_pool_pack(const struct ovs_list *ct_rs_pools, struct ds *);
 
 #endif /* CT_DPIF_H */

@@ -696,7 +696,7 @@ get_vport_type(const struct dpif_netlink_vport *vport)
         return "erspan";
 
     case OVS_VPORT_TYPE_IP6ERSPAN:
-        return "ip6erspan"; 
+        return "ip6erspan";
 
     case OVS_VPORT_TYPE_IP6GRE:
         return "ip6gre";
@@ -3429,6 +3429,9 @@ const struct dpif_class dpif_netlink_class = {
     dpif_netlink_ct_set_limits,
     dpif_netlink_ct_get_limits,
     dpif_netlink_ct_del_limits,
+    NULL,                       /*ct_add_rs_pool*/
+    NULL,                       /*ct_del_rs_pool*/
+    NULL,                       /*ct_dump_rs_pool*/
     NULL,                       /* ipf_set_enabled */
     NULL,                       /* ipf_set_min_frag */
     NULL,                       /* ipf_set_max_nfrags */
