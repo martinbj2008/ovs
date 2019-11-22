@@ -1546,7 +1546,7 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
 
     /* The flow will be deleted from all pmds currently in the datapath. */
     error = dpif_flow_del(dpif, key.data, key.size,
-                          ufid_present ? &ufid : NULL, PMD_ID_NULL,
+                          ufid_present ? &ufid : NULL, PMD_ID_NULL, priority,
                           dpctl_p->print_statistics ? &stats : NULL);
 
     if (error) {
