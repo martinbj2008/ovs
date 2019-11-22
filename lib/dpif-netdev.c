@@ -848,10 +848,14 @@ static void queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
                                   struct dp_netdev_flow *flow);
 static void whitelist_flow_init(struct dp_netdev_pmd_thread *pmd, odp_port_t in_port);
 static struct dp_netdev_flow * whitelist_drop_flow_lookup(struct dp_netdev_pmd_thread *pmd, odp_port_t in_port);
-static bool dpcls_lookup(struct dp_netdev_pmd_thread *pmd, struct dpcls *cls,
-                         const struct netdev_flow_key *keys[],
-                         struct dpcls_rule **rules, size_t cnt,
-                         int *num_lookups_p, bool is_fast_path);
+static bool
+dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
+             struct dpcls_rule **rules, const size_t cnt,
+             int *num_lookups_p, int priority);
+static bool
+dpcls_lookup_fast_path(struct dp_netdev_pmd_thread *pmd, struct dpcls *cls, const struct netdev_flow_key *keys[],
+             struct dpcls_rule **rules, const size_t cnt,
+             int *num_lookups_p);
 
 static void
 emc_cache_init(struct emc_cache *flow_cache)
@@ -1066,6 +1070,7 @@ pmd_info_show_stats(struct ds *reply,
                   stats[PMD_CYCLES_ITER_BUSY], total_packets);
 }
 
+#if 0
 static void dump_subtable_address(struct dp_netdev_pmd_thread *pmd) {
     struct dpcls *cls;
     struct dpcls_subtable *subtable;
@@ -1086,6 +1091,7 @@ static void dump_subtable_address(struct dp_netdev_pmd_thread *pmd) {
     ovs_mutex_unlock(&pmd->flow_mutex);
     VLOG_INFO("%s,%d,%s", __FUNCTION__, __LINE__, buf);
 }
+#endif
 
 static void
 pmd_info_show_perf(struct ds *reply,
@@ -3078,7 +3084,7 @@ smc_insert(struct dp_netdev_pmd_thread *pmd,
 static struct dp_netdev_flow *
 dp_netdev_pmd_lookup_flow(struct dp_netdev_pmd_thread *pmd,
                           const struct netdev_flow_key *key,
-                          int *lookup_num_p)
+                          int *lookup_num_p, int priority)
 {
     struct dpcls *cls;
     struct dpcls_rule *rule;
@@ -3088,7 +3094,7 @@ dp_netdev_pmd_lookup_flow(struct dp_netdev_pmd_thread *pmd,
 
     cls = dp_netdev_pmd_lookup_dpcls(pmd, in_port);
     if (OVS_LIKELY(cls)) {
-        dpcls_lookup(pmd, cls, &key, &rule, 1, lookup_num_p, false);
+        dpcls_lookup(cls, &key, &rule, 1, lookup_num_p, priority);
         netdev_flow = dp_netdev_flow_cast(rule);
     }
     return netdev_flow;
@@ -3097,7 +3103,7 @@ dp_netdev_pmd_lookup_flow(struct dp_netdev_pmd_thread *pmd,
 static struct dp_netdev_flow *
 dp_netdev_pmd_find_flow(const struct dp_netdev_pmd_thread *pmd,
                         const ovs_u128 *ufidp, const struct nlattr *key,
-                        size_t key_len)
+                        size_t key_len, uint32_t priority)
 {
     struct dp_netdev_flow *netdev_flow;
     struct flow flow;
@@ -3120,7 +3126,8 @@ dp_netdev_pmd_find_flow(const struct dp_netdev_pmd_thread *pmd,
     if (ufidp) {
         CMAP_FOR_EACH_WITH_HASH (netdev_flow, node, dp_netdev_flow_hash(ufidp),
                                  &pmd->flow_table) {
-            if (ovs_u128_equals(netdev_flow->ufid, *ufidp)) {
+            if (ovs_u128_equals(netdev_flow->ufid, *ufidp) && netdev_flow->priority == priority) {
+                VLOG_INFO("%s, %d, netflow->priority:%d, priority:%d", __FUNCTION__, __LINE__, netdev_flow->priority, priority);
                 return netdev_flow;
             }
         }
@@ -3303,7 +3310,7 @@ dpif_netdev_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get)
     HMAPX_FOR_EACH (node, &to_find) {
         pmd = (struct dp_netdev_pmd_thread *) node->data;
         netdev_flow = dp_netdev_pmd_find_flow(pmd, get->ufid, get->key,
-                                              get->key_len);
+                                              get->key_len, 0);
         if (netdev_flow) {
             dp_netdev_flow_to_dpif_flow(netdev_flow, get->buffer, get->buffer,
                                         get->flow, false);
@@ -3454,7 +3461,7 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
     }
 
     ovs_mutex_lock(&pmd->flow_mutex);
-    netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL);
+    netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL, put->priority);
     if (netdev_flow && !is_gw_appctl_ufid(&netdev_flow->ufid) && is_gw_appctl_ufid(ufid) && put->flags & DPIF_FP_CREATE) { //when flow add confict, appctl flow will ignore normal upcall flows
         netdev_flow = NULL;
     }
@@ -3616,7 +3623,7 @@ flow_del_on_pmd(struct dp_netdev_pmd_thread *pmd,
 
     ovs_mutex_lock(&pmd->flow_mutex);
     netdev_flow = dp_netdev_pmd_find_flow(pmd, del->ufid, del->key,
-                                          del->key_len);
+                                          del->key_len, del->priority);
     if (netdev_flow) {
         if (stats) {
             get_dpif_flow_stats(netdev_flow, stats);
@@ -6900,7 +6907,7 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
          * mutex lock outside the loop, but that's an awful long time
          * to be locking revalidators out of making flow modifications. */
         ovs_mutex_lock(&pmd->flow_mutex);
-        netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL);
+        netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL, INT_MIN);
         if (OVS_LIKELY(!netdev_flow)) {
             netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid, MIN_DPCLS_FLOW_PRI,
                                              add_actions->data,
@@ -6952,8 +6959,8 @@ fast_path_processing(struct dp_netdev_pmd_thread *pmd,
     /* Get the classifier for the in_port */
     cls = dp_netdev_pmd_lookup_dpcls(pmd, in_port);
     if (OVS_LIKELY(cls)) {
-        any_miss = !dpcls_lookup(pmd, cls, (const struct netdev_flow_key **)keys,
-                                rules, cnt, &lookup_cnt, true);
+        any_miss = !dpcls_lookup_fast_path(pmd, cls, (const struct netdev_flow_key **)keys,
+                                rules, cnt, &lookup_cnt);
     } else {
         any_miss = true;
         memset(rules, 0, sizeof(rules));
@@ -6976,7 +6983,7 @@ fast_path_processing(struct dp_netdev_pmd_thread *pmd,
              * a rule covering this flow.  In this case, it's a lot cheaper
              * to catch it here than execute a miss. */
             netdev_flow = dp_netdev_pmd_lookup_flow(pmd, keys[i],
-                                                    &add_lookup_cnt);
+                                                    &add_lookup_cnt, INT_MIN);
             if (netdev_flow) {
                 lookup_cnt += add_lookup_cnt;
                 rules[i] = &netdev_flow->cr;
@@ -7321,7 +7328,7 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
             DP_PACKET_BATCH_FOR_EACH (i, packet, packets_) {
                 p->output_pkts_rxqs[dp_packet_batch_size(&p->output_pkts)] =
                                                              pmd->ctx.last_rxq;
-                dp_packet_batch_add(&p->output_pkts, packet);
+               dp_packet_batch_add(&p->output_pkts, packet);
             }
             return;
         }
@@ -7943,7 +7950,6 @@ dpcls_init(struct dpcls *cls)
 {
     cmap_init(&cls->subtables_map);
     pvector_init(&cls->subtables);
-    whitelist_flow_init(cls);
 }
 
 static void
@@ -8134,17 +8140,6 @@ dpcls_insert(struct dpcls *cls, struct dpcls_rule *rule,
 {
     struct dpcls_subtable *subtable = dpcls_find_subtable(cls, mask, is_appctl, priority);
 
-#if 0
-    subtable->is_appctl = is_appctl;
-    if (is_appctl) {
-        if (subtable->priority && subtable->priority != (priority - 1))
-            VLOG_WARN("subtable already exsit, priority is conflict, we will used priority before! subtable:%p, subtable->priority is %d, config priority is %d", subtable, subtable->priority, priority);
-        else {
-            subtable->priority = (priority > 0) ? priority -1 : 0 ;
-            VLOG_INFO("subtable:%p, subtable->priority is %d, priority is %d", subtable, subtable->priority, priority);
-        }
-    }
-#endif
     /* Refer to subtable's mask, also for later removal. */
     rule->mask = &subtable->mask;
     cmap_insert(&subtable->rules, &rule->cmap_node, rule->flow.hash);
@@ -8234,9 +8229,9 @@ dpcls_rule_matches_key(const struct dpcls_rule *rule,
  *
  * Returns true if all miniflows found a corresponding rule. */
 static bool
-dpcls_lookup(struct dp_netdev_pmd_thread *pmd, struct dpcls *cls, const struct netdev_flow_key *keys[],
+dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
              struct dpcls_rule **rules, const size_t cnt,
-             int *num_lookups_p, bool is_fast_path)
+             int *num_lookups_p, int priority)
 {
     /* The received 'cnt' miniflows are the search-keys that will be processed
      * to find a matching entry into the available subtables.
@@ -8254,10 +8249,6 @@ dpcls_lookup(struct dp_netdev_pmd_thread *pmd, struct dpcls *cls, const struct n
 
     int lookups_match = 0, subtable_pos = 1;
     uint32_t found_map = 0;
-    uint32_t wl_rematch_keys = 0;
-    int i = 0;
-    uint32_t last_priority = 0, key_map_store=0;
-    struct dp_netdev_flow *flow = NULL;
     /* The Datapath classifier - aka dpcls - is composed of subtables.
      * Subtables are dynamically created as needed when new rules are inserted.
      * Each subtable collects rules with matches on a specific subset of packet
@@ -8265,26 +8256,12 @@ dpcls_lookup(struct dp_netdev_pmd_thread *pmd, struct dpcls *cls, const struct n
      * search-key against each subtable, but when a match is found for a
      * search-key, the search for that key can stop because the rules are
      * non-overlapping. */
-    PVECTOR_FOR_EACH (subtable, &cls->subtables) {
-        if (last_priority == WHITELIST_SUBTABLE_PRI && subtable->priority < WHITELIST_SUBTABLE_PRI && is_fast_path) {
-            uint32_t drop_counts = count_1bits(keys_map);
-            if (drop_counts) {
-                flow = whitelist_drop_flow_lookup(pmd, cls->in_port);
-                if (flow) {
-                    ULLONG_FOR_EACH_1 (i, keys_map) { //after whitelist rule match, all mismatch pkt will be droped
-                        rules[i] = &flow->cr;
-                    }
-                }
-            }
-
-            wl_rematch_keys = keys_map ^ key_map_store;
-            keys_map = wl_rematch_keys;
-            if (!keys_map) {                   //all pkt will be drop , need not rematch low priority subtables
-                if (num_lookups_p) {
-                    *num_lookups_p = lookups_match;
-                }
-                return true;
-            }
+    PVECTOR_FOR_EACH(subtable, &cls->subtables) {
+        VLOG_DBG("%s, %d, cls:%p, priority:%d, subtable->priority:%d", __FUNCTION__, __LINE__, cls, priority, subtable->priority);
+        if (priority != INT_MIN) {
+            //flow tables for non-dpdk flows subtable will not sort by priority
+            if (!subtable->is_appctl || subtable->priority != SUBTABLE_PRIORITY(priority))
+                    continue;
         }
 
         /* Call the subtable specific lookup function. */
@@ -8294,16 +8271,6 @@ dpcls_lookup(struct dp_netdev_pmd_thread *pmd, struct dpcls *cls, const struct n
          * estimates the "spread" of subtables looked at per matched packet. */
         uint32_t pkts_matched = count_1bits(found_map);
         lookups_match += pkts_matched * subtable_pos;
-        if (subtable->priority == WHITELIST_SUBTABLE_PRI && last_priority != WHITELIST_SUBTABLE_PRI && is_fast_path) {
-            key_map_store = keys_map;
-        }
-
-        last_priority = subtable->priority;
-        if (last_priority == WHITELIST_SUBTABLE_PRI && is_fast_path) {
-           keys_map &= ~found_map;
-           subtable_pos ++;
-           continue;
-        }
         /* Clear the found rules, and return early if all packets are found. */
         keys_map &= ~found_map;
 
@@ -8366,4 +8333,100 @@ static void whitelist_flow_init(struct dp_netdev_pmd_thread *pmd, odp_port_t in_
         dp_netdev_flow_add(pmd, &match, &ufid, 1, NULL, 0); //whitelist drop priority is 1
         ovs_mutex_unlock(&pmd->flow_mutex);
     }
+}
+
+static bool
+dpcls_lookup_fast_path(struct dp_netdev_pmd_thread *pmd, struct dpcls *cls, const struct netdev_flow_key *keys[],
+             struct dpcls_rule **rules, const size_t cnt,
+             int *num_lookups_p)
+{
+    /* The received 'cnt' miniflows are the search-keys that will be processed
+     * to find a matching entry into the available subtables.
+     * The number of bits in map_type is equal to NETDEV_MAX_BURST. */
+#define MAP_BITS (sizeof(uint32_t) * CHAR_BIT)
+    BUILD_ASSERT_DECL(MAP_BITS >= NETDEV_MAX_BURST);
+
+    struct dpcls_subtable *subtable;
+    uint32_t keys_map = TYPE_MAXIMUM(uint32_t); /* Set all bits. */
+
+    if (cnt != MAP_BITS) {
+        keys_map >>= MAP_BITS - cnt; /* Clear extra bits. */
+    }
+    memset(rules, 0, cnt * sizeof *rules);
+
+    int lookups_match = 0, subtable_pos = 1;
+    uint32_t found_map = 0;
+    uint32_t wl_rematch_keys = 0;
+    int i = 0;
+    uint32_t last_priority = 0, key_map_store=0;
+    struct dp_netdev_flow *flow = NULL;
+    /* The Datapath classifier - aka dpcls - is composed of subtables.
+     * Subtables are dynamically created as needed when new rules are inserted.
+     * Each subtable collects rules with matches on a specific subset of packet
+     * fields as defined by the subtable's mask.  We proceed to process every
+     * search-key against each subtable, but when a match is found for a
+     * search-key, the search for that key can stop because the rules are
+     * non-overlapping. */
+    PVECTOR_FOR_EACH (subtable, &cls->subtables) {
+        if (last_priority == WHITELIST_SUBTABLE_PRI && subtable->priority < WHITELIST_SUBTABLE_PRI) {
+            uint32_t drop_counts = count_1bits(keys_map);
+            if (drop_counts) {
+                flow = whitelist_drop_flow_lookup(pmd, cls->in_port);
+                if (flow) {
+                    ULLONG_FOR_EACH_1 (i, keys_map) { //after whitelist rule match, all mismatch pkt will be droped
+                        rules[i] = &flow->cr;
+                    }
+                }
+            }
+
+            wl_rematch_keys = keys_map ^ key_map_store;
+            keys_map = wl_rematch_keys;
+            ULLONG_FOR_EACH_1(i, keys_map) {
+                flow = dp_netdev_flow_cast(rules[i]);
+                atomic_store_relaxed(&flow->stats.used, pmd->ctx.now/1000);
+                non_atomic_ullong_add(&flow->stats.packet_count, 1);
+            }
+
+            if (!keys_map) {                   //all pkt will be drop , need not rematch low priority subtables
+                if (num_lookups_p) {
+                    *num_lookups_p = lookups_match;
+                }
+                return true;
+            }
+        }
+
+        /* Call the subtable specific lookup function. */
+        found_map = subtable->lookup_func(subtable, keys_map, keys, rules);
+
+        /* Count the number of subtables searched for this packet match. This
+         * estimates the "spread" of subtables looked at per matched packet. */
+        uint32_t pkts_matched = count_1bits(found_map);
+        lookups_match += pkts_matched * subtable_pos;
+        if (subtable->priority == WHITELIST_SUBTABLE_PRI && last_priority != WHITELIST_SUBTABLE_PRI) {
+            key_map_store = keys_map;
+        }
+
+        last_priority = subtable->priority;
+        if (last_priority == WHITELIST_SUBTABLE_PRI) {
+           keys_map &= ~found_map;
+           subtable_pos ++;
+           continue;
+        }
+        /* Clear the found rules, and return early if all packets are found. */
+        keys_map &= ~found_map;
+
+        if (!keys_map) {
+            if (num_lookups_p) {
+                *num_lookups_p = lookups_match;
+            }
+            return true;
+        }
+        subtable_pos++;
+    }
+
+    if (num_lookups_p) {
+        *num_lookups_p = lookups_match;
+    }
+
+    return false;
 }

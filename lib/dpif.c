@@ -975,7 +975,7 @@ dpif_probe_feature(struct dpif *dpif, const char *name,
     error = dpif_flow_put(dpif, DPIF_FP_CREATE | DPIF_FP_MODIFY | DPIF_FP_PROBE,
                           key->data, key->size, NULL, 0,
                           nl_actions, nl_actions_size,
-                          ufid, NON_PMD_CORE_ID, MIN_DPCLS_FLOW_PRI, NULL);
+                          ufid, NON_PMD_CORE_ID, MIN_DPCLS_FLOW_PRI, NULL); 
     if (error) {
         if (error != EINVAL && error != EOVERFLOW) {
             VLOG_WARN("%s: %s flow probe failed (%s)",
@@ -994,7 +994,7 @@ dpif_probe_feature(struct dpif *dpif, const char *name,
     }
 
     error = dpif_flow_del(dpif, key->data, key->size, ufid,
-                          NON_PMD_CORE_ID, NULL);
+                          NON_PMD_CORE_ID, 0, NULL);   //ofproto flow priority is always 0
     if (error) {
         VLOG_WARN("%s: failed to delete %s feature probe flow",
                   dpif_name(dpif), name);
@@ -1065,7 +1065,7 @@ dpif_flow_put(struct dpif *dpif, enum dpif_flow_put_flags flags,
 int
 dpif_flow_del(struct dpif *dpif,
               const struct nlattr *key, size_t key_len, const ovs_u128 *ufid,
-              const unsigned pmd_id, struct dpif_flow_stats *stats)
+              const unsigned pmd_id, uint32_t priority, struct dpif_flow_stats *stats)
 {
     struct dpif_op *opp;
     struct dpif_op op;
@@ -1077,6 +1077,7 @@ dpif_flow_del(struct dpif *dpif,
     op.flow_del.pmd_id = pmd_id;
     op.flow_del.stats = stats;
     op.flow_del.terse = false;
+    op.flow_del.priority = priority;
 
     opp = &op;
     dpif_operate(dpif, &opp, 1, DPIF_OFFLOAD_AUTO);

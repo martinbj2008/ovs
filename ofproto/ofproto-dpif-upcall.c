@@ -2319,6 +2319,7 @@ delete_op_init__(struct udpif *udpif, struct ukey_op *op,
     op->dop.flow_del.ufid = flow->ufid_present ? &flow->ufid : NULL;
     op->dop.flow_del.pmd_id = flow->pmd_id;
     op->dop.flow_del.stats = &op->stats;
+    op->dop.flow_del.priority = MIN_DPCLS_FLOW_PRI;
     op->dop.flow_del.terse = udpif_use_ufid(udpif);
 }
 
@@ -2332,6 +2333,7 @@ delete_op_init(struct udpif *udpif, struct ukey_op *op, struct udpif_key *ukey)
     op->dop.flow_del.ufid = ukey->ufid_present ? &ukey->ufid : NULL;
     op->dop.flow_del.pmd_id = ukey->pmd_id;
     op->dop.flow_del.stats = &op->stats;
+    op->dop.flow_del.priority = MIN_DPCLS_FLOW_PRI;
     op->dop.flow_del.terse = udpif_use_ufid(udpif);
 }
 

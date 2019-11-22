@@ -533,7 +533,7 @@ int dpif_flow_put(struct dpif *, enum dpif_flow_put_flags,
                   struct dpif_flow_stats *);
 int dpif_flow_del(struct dpif *,
                   const struct nlattr *key, size_t key_len,
-                  const ovs_u128 *ufid, const unsigned pmd_id,
+                  const ovs_u128 *ufid, const unsigned pmd_id, uint32_t priority,
                   struct dpif_flow_stats *);
 int dpif_flow_get(struct dpif *,
                   const struct nlattr *key, size_t key_len,
@@ -688,7 +688,7 @@ struct dpif_flow_del {
     bool terse;                     /* OK to skip sending/receiving full flow
                                      * info? */
     unsigned pmd_id;                /* Datapath poll mode driver id. */
-
+    uint32_t priority;
     /* Output. */
     struct dpif_flow_stats *stats;  /* Optional flow statistics. */
 };
