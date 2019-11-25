@@ -7205,7 +7205,7 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
             struct dp_packet *packet;
             DP_PACKET_BATCH_FOR_EACH (i, packet, packets_) {
                 packet->md.recirc_id = nl_attr_get_u32(a);
-		if (packet->md.recirc_id == RECIRC_ID_PUSH_VXLAN)
+                if (packet->md.recirc_id == RECIRC_ID_PUSH_VXLAN)
                     packet->md.in_port.odp_port = 0;
             }
 
