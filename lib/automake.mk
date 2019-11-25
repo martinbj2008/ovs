@@ -56,6 +56,8 @@ lib_libopenvswitch_la_SOURCES = \
 	lib/conntrack-other.c \
 	lib/conntrack.c \
 	lib/conntrack.h \
+	lib/qos.c \
+	lib/qos.h \
 	lib/coverage.c \
 	lib/coverage.h \
 	lib/crc32c.c \

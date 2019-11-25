@@ -43,6 +43,8 @@
 #include "util.h"
 #include "vswitch-idl.h"
 
+#include "qos.h"
+
 VLOG_DEFINE_THIS_MODULE(dpdk);
 
 static FILE *log_stream = NULL;       /* Stream for DPDK log redirection */
@@ -485,6 +487,8 @@ dpdk_init(const struct smap *ovs_other_config)
                 ovs_abort(rte_errno, "Cannot init EAL");
             }
             ovsthread_once_done(&once_enable);
+
+            ovs_qos_init();
         } else {
             VLOG_ERR_ONCE("DPDK Initialization Failed.");
         }

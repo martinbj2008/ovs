@@ -52,6 +52,8 @@
 #include "openvswitch/ofp-flow.h"
 #include "openvswitch/ofp-port.h"
 
+#include "qos.h"
+
 typedef int dpctl_command_handler(int argc, const char *argv[],
                                   struct dpctl_params *);
 struct dpctl_command {
@@ -245,6 +247,219 @@ opt_dpif_open(int argc, const char *argv[], struct dpctl_params *dpctl_p,
         }
     }
     return error;
+}
+
+static int
+__dpctl_qos_param_parse(char *option, struct ovs_qos_param *param, struct dpctl_params *dpctl_p)
+{
+    char *save = NULL;
+    char *key = strtok_r(option, "=", &save);
+    char *value = strtok_r(NULL, "", &save);
+    
+    if (!key || !value)
+        return -1;
+
+    if (!strcmp(key, "dst")) {
+        if (param->match.dst) {
+            dpctl_error(dpctl_p, -1, "qos dst duplicated\n");
+            return -1;
+        }
+        
+        char *ip = strtok_r(value, "/", &save);
+        char *mask = strtok_r(NULL, "", &save);
+        ovs_be32 tmp;
+
+        if (ip && !ip_parse(ip, &tmp)) {
+            dpctl_error(dpctl_p, -1, "parse dst %s fail\n", ip);
+            return -1;
+        }
+        
+        param->match.dst = ntohl(tmp);
+
+        if (!mask) {
+            tmp = 0xFFFFFFFF;
+        } else if (!ip_parse(mask, &tmp)) {
+            dpctl_error(dpctl_p, -1, "parse mask %s fail\n", mask);
+            return -1;
+        }
+        
+        param->mask.dst = ntohl(tmp);
+        
+        return 0;
+    } else if (!strcmp(key, "rate")) {
+        if (param->rate) {
+            dpctl_error(dpctl_p, -1, "qos rate duplicated\n");
+            return -1;
+        }
+        
+        param->rate = atoi(value);
+        return 0;
+    } else if (!strcmp(key, "reg")) {
+        if (param->match.reg != UINT_MAX) {
+            dpctl_error(dpctl_p, -1, "qos reg duplicated\n");
+            return -1;
+        }
+        
+        param->match.reg = atoi(value);
+        return 0;
+
+    } else if (!strcmp(key, "dir")) {
+        if (param->match.dir) {
+            dpctl_error(dpctl_p, -1, "qos dir duplicated");
+            return -1;
+        }
+        
+        if (!strcmp(value, "input")) {
+            param->match.dir = OVS_QOS_DIR_INPUT;
+        } else if (!strcmp(value, "output")) {
+            param->match.dir = OVS_QOS_DIR_OUTPUT;
+        } else {
+            dpctl_error(dpctl_p, -1, "qos dir should be input or output\n");
+            return -1;
+        }
+        
+        return 0;
+    } else {
+            dpctl_error(dpctl_p, -1, "%s not supported\n", key);
+            return -1;
+    }
+
+    return 0;
+}
+
+static int
+dpctl_add_qos(int argc OVS_UNUSED, const char *argv[],
+             struct dpctl_params *dpctl_p)
+{
+    char *save = NULL;
+    char *argcopy = xstrdup(argv[1]);
+    char *option = strtok_r(argcopy, ",", &save);
+
+    struct ovs_qos_param param = {
+        .match = {
+            .dir = OVS_QOS_DIR_INVALID,
+            .reg = UINT_MAX,
+        },
+    };
+
+    if (__dpctl_qos_param_parse(option, &param, dpctl_p))
+        goto err;
+
+    while ((option = strtok_r(NULL, ",", &save)) != NULL) {
+        if (__dpctl_qos_param_parse(option, &param, dpctl_p))
+            goto err;
+    }
+
+    if (!param.rate || !param.match.dst || param.match.dir == OVS_QOS_DIR_INVALID) {
+        dpctl_error(dpctl_p, -1, "you shoud specify dst, rate, and dir.\n");
+        goto err;
+    }
+
+    struct ovs_qos_key match;
+    match.dst = param.match.dst & param.mask.dst;
+    match.reg = param.match.reg;
+    match.dir = param.match.dir;
+    
+    if (ovs_qos_key_lookup(&match)) {
+        dpctl_error(dpctl_p, -1, "the qos rule exist.\n");
+        goto err;
+    }
+
+    struct ovs_qos_node *n = ovs_qos_key_alloc(&param);
+    if (!n) {
+        dpctl_error(dpctl_p, -1, "alloc ovs qos node fail.\n");
+        goto err;
+    }
+
+    n->mask = ovs_qos_mask_alloc(&param);
+
+    ovs_qos_key_insert(n);
+
+err:
+    free(argcopy);
+    return 0;
+}
+
+static int
+dpctl_del_qos(int argc OVS_UNUSED, const char *argv[],
+             struct dpctl_params *dpctl_p)
+{
+    char *save = NULL;
+    char *argcopy = xstrdup(argv[1]);
+    char *option = strtok_r(argcopy, ",", &save);
+
+    struct ovs_qos_param param = {
+        .match = {
+            .dir = OVS_QOS_DIR_INVALID,
+            .reg = UINT_MAX,
+        },
+    };
+
+    if (__dpctl_qos_param_parse(option, &param, dpctl_p))
+        goto err;
+
+    while ((option = strtok_r(NULL, ",", &save)) != NULL) {
+        if (__dpctl_qos_param_parse(option, &param, dpctl_p))
+            goto err;
+    }
+
+    if (!param.match.dst || !param.match.reg || param.match.dir == OVS_QOS_DIR_INVALID) {
+        dpctl_error(dpctl_p, -1, "you shoud specify dst, rate, and dir.\n");
+        goto err;
+    }
+
+    struct ovs_qos_key match;
+    match.dst = param.match.dst & param.mask.dst;
+    match.reg = param.match.reg;
+    match.dir = param.match.dir;
+    
+    struct ovs_qos_node *n = ovs_qos_key_lookup(&match);
+    
+    if (!n) {
+        dpctl_error(dpctl_p, -1, "the qos rule don't exist.\n");
+        goto err;
+    }
+    
+    ovs_qos_key_remove(n);
+    ovs_qos_mask_destroy(n->mask);
+    ovs_qos_key_destroy(n);
+
+err:
+    free(argcopy);
+    return 0;
+}
+
+static int
+dpctl_get_qos(int argc OVS_UNUSED, const char *argv[] OVS_UNUSED,
+             struct dpctl_params *dpctl_p)
+{
+    OVS_QOS_NODE_FOREACH {
+        char dst[INET_ADDRSTRLEN];
+        char msk[INET_ADDRSTRLEN];
+        unsigned int tmp = ntohl(n->match.dst);
+
+        inet_ntop(AF_INET, &tmp, dst, INET_ADDRSTRLEN);
+
+        tmp = ntohl(n->mask->dst);
+        inet_ntop(AF_INET, &tmp, msk, INET_ADDRSTRLEN);
+
+        dpctl_print(dpctl_p, "%s/%s\t\t%lu\t%d\n", dst, msk, n->qos_profile.cbs /1024 *8, n->match.reg);
+    }
+
+    return 0;
+}
+
+static int
+dpctl_flush_qos(int argc OVS_UNUSED, const char *argv[] OVS_UNUSED,
+             struct dpctl_params *dpctl_p OVS_UNUSED)
+{
+    OVS_QOS_NODE_FOREACH_SAFE {
+        ovs_qos_key_remove(n);
+        ovs_qos_mask_destroy(n->mask);
+        ovs_qos_key_destroy(n);
+    }
+
+    return 0;
 }
 
 static int
@@ -2460,6 +2675,10 @@ static const struct dpctl_command all_commands[] = {
     { "get-flow", "[dp] ufid", 1, 2, dpctl_get_flow, DP_RO },
     { "del-flow", "[dp] flow", 1, 2, dpctl_del_flow, DP_RW },
     { "del-flows", "[dp]", 0, 1, dpctl_del_flows, DP_RW },
+    { "add-qos", "dst=ipv4,reg=xx,rate=xx,dir=input/output", 1, 1, dpctl_add_qos, DP_RW },
+    { "del-qos", "dst=ipv4,reg=xx,dir=input/output", 1, 1, dpctl_del_qos, DP_RW },
+    { "get-qos", "", 0, 0, dpctl_get_qos, DP_RO },
+    { "flush-qos", "", 0, 0, dpctl_flush_qos, DP_RW },
     { "dump-conntrack", "[dp] [zone=N]", 0, 2, dpctl_dump_conntrack, DP_RO },
     { "flush-conntrack", "[dp] [zone=N] [ct-tuple]", 0, 3,
       dpctl_flush_conntrack, DP_RW },

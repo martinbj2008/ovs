@@ -66,6 +66,7 @@
 #include "unixctl.h"
 #include "util.h"
 #include "uuid.h"
+#include "qos.h"
 
 enum {VIRTIO_RXQ, VIRTIO_TXQ, VIRTIO_QNUM};
 
@@ -2127,6 +2128,55 @@ ingress_policer_run(struct ingress_policer *policer, struct rte_mbuf **pkts,
     return cnt;
 }
 
+static int
+ovs_qos_policer_run(struct rte_mbuf **pkts, int pkt_cnt,
+                    enum ovs_qos_direction dir)
+{
+    int i, used = 0, droped = 0;
+
+    for (i = 0; i < pkt_cnt; i++) {
+        struct ether_hdr *eth_hdr;
+        struct rte_mbuf *pkt = pkts[i];
+        
+        eth_hdr = rte_pktmbuf_mtod(pkt, struct ether_hdr *);
+        
+        if (eth_hdr->ether_type == rte_cpu_to_be_16(ETHER_TYPE_IPv4)) {
+
+            struct ipv4_hdr *ipv4_hdr = (struct ipv4_hdr *)(eth_hdr + 1);
+        
+            struct ovs_qos_key match;
+            match.dir = dir;
+            match.dst = rte_be_to_cpu_32(ipv4_hdr->dst_addr);
+            match.reg = UINT_MAX; 
+
+            if (ipv4_hdr->next_proto_id == IPPROTO_UDP) {
+                struct udp_hdr *udp_hdr;
+                udp_hdr = (struct udp_hdr *)((char *)ipv4_hdr +
+                                             ((ipv4_hdr->version_ihl & IPV4_HDR_IHL_MASK) << 2));
+
+                if (udp_hdr->dst_port == htons(4789)) {
+                    struct vxlanhdr *vxh = (struct vxlanhdr *)(udp_hdr + 1);
+                    match.reg = ntohl(get_16aligned_be32(&vxh->vx_vni)) >> 8;
+                }
+            }
+
+            /* Don't use ipv4 total_length, attack ! */
+            int pkt_len = rte_pktmbuf_pkt_len(pkt) - sizeof(struct ether_hdr);
+
+            if (OVS_QOS_ACT_DROP == ovs_qos_counter(&match, pkt_len)) {
+                rte_pktmbuf_free(pkt);
+                droped ++;
+                continue;
+            }
+        }
+
+        pkts[used] = pkts[i];
+        used ++;
+    }
+    
+    return pkt_cnt - droped;
+}
+
 static bool
 is_vhost_running(struct netdev_dpdk *dev)
 {
@@ -2230,6 +2280,8 @@ netdev_dpdk_vhost_rxq_recv(struct netdev_rxq *rxq,
         }
     }
 
+    nb_rx = ovs_qos_policer_run((struct rte_mbuf **) batch->packets, nb_rx, OVS_QOS_DIR_INPUT);
+
     if (policer) {
         dropped = nb_rx;
         nb_rx = ingress_policer_run(policer,
@@ -2277,6 +2329,8 @@ netdev_dpdk_rxq_recv(struct netdev_rxq *rxq, struct dp_packet_batch *batch,
     if (!nb_rx) {
         return EAGAIN;
     }
+    
+    nb_rx = ovs_qos_policer_run((struct rte_mbuf **) batch->packets, nb_rx, OVS_QOS_DIR_INPUT);
 
     if (policer) {
         dropped = nb_rx;
@@ -2509,7 +2563,12 @@ netdev_dpdk_vhost_send(struct netdev *netdev, int qid,
         dpdk_do_tx_copy(netdev, qid, batch);
         dp_packet_delete_batch(batch, true);
     } else {
-        __netdev_dpdk_vhost_send(netdev, qid, batch->packets, batch->count);
+        batch->count = ovs_qos_policer_run((struct rte_mbuf **) batch->packets,
+                                           dp_packet_batch_size(batch),
+                                           OVS_QOS_DIR_OUTPUT);
+
+        __netdev_dpdk_vhost_send(netdev, qid, batch->packets,
+                                 dp_packet_batch_size(batch));
     }
     return 0;
 }
@@ -2562,6 +2621,10 @@ netdev_dpdk_eth_send(struct netdev *netdev, int qid,
                      struct dp_packet_batch *batch, bool concurrent_txq)
 {
     struct netdev_dpdk *dev = netdev_dpdk_cast(netdev);
+    
+    batch->count = ovs_qos_policer_run((struct rte_mbuf **) batch->packets,
+                                        dp_packet_batch_size(batch),
+                                        OVS_QOS_DIR_OUTPUT);
 
     netdev_dpdk_send__(dev, qid, batch, concurrent_txq);
     return 0;
