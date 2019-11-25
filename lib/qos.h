@@ -92,4 +92,20 @@ void ovs_qos_mask_destroy(struct ovs_qos_mask *mask);
     struct ovs_qos_mask *m;     \
     RCULIST_FOR_EACH(m, list, &mask_list)
 
+static inline char *string_ovs_qos_direction(enum ovs_qos_direction dir)
+{
+    switch (dir) {
+    case OVS_QOS_DIR_INVALID:
+        return "invalid";
+    case OVS_QOS_DIR_INPUT:
+        return "input";
+    case OVS_QOS_DIR_OUTPUT:
+        return "output";
+    case OVS_QOS_DIR_ACTION:
+        return "action";
+    default:
+        return "invalid";
+    }
+}
+
 #endif

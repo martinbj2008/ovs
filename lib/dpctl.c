@@ -443,7 +443,9 @@ dpctl_get_qos(int argc OVS_UNUSED, const char *argv[] OVS_UNUSED,
         tmp = ntohl(n->mask->dst);
         inet_ntop(AF_INET, &tmp, msk, INET_ADDRSTRLEN);
 
-        dpctl_print(dpctl_p, "%s/%s\t\t%lu\t%d\n", dst, msk, n->qos_profile.cbs *8/1024, n->match.reg);
+        dpctl_print(dpctl_p, "%s\t%s\t\t%lu\t%d\t%s\n",
+                    dst, msk, n->qos_profile.cbs *8/1024,
+                    n->match.reg, string_ovs_qos_direction(n->match.dir));
     }
 
     return 0;
