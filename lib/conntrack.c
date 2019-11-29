@@ -502,13 +502,13 @@ write_ct_md(struct dp_packet *pkt, uint16_t zone, const struct conn *conn,
 static inline struct ct_rs_pool_t*
 get_ct_rs_pool(struct conntrack *ct, char *pool_name)
 {
-    struct ct_rs_pool_t *rs_pool = NULL;
+    struct ct_rs_pool_t *rs_pool;
     LIST_FOR_EACH(rs_pool, node, &ct->rs_pools) {
         if (!strcmp(rs_pool->pool_name, pool_name)) {
-            break;
+            return rs_pool;
         }
     }
-    return rs_pool;
+    return NULL;
 }
 
 static uint8_t
@@ -2461,11 +2461,13 @@ conntrack_add_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *rs_pool)
 int
 conntrack_del_rs_pool(struct conntrack *ct, char *pool_name)
 {
-    struct ct_rs_pool_t *rs_pool = get_ct_rs_pool(ct, pool_name);
-    if (rs_pool) {
-        ovs_list_remove(&rs_pool->node);
-        /*FIXME: free pool node from ovs list*/
-        free(rs_pool);
+    struct ct_rs_pool_t *rs_pool, *next;
+    LIST_FOR_EACH_SAFE(rs_pool, next, node, &ct->rs_pools) {
+        if (!strcmp(rs_pool->pool_name, pool_name)) {
+            ovs_list_remove(&rs_pool->node);
+            /*FIXME: free pool node from ovs list*/
+            free(rs_pool);
+        }
     }
     return 0;
 }
