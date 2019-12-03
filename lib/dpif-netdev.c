@@ -99,7 +99,7 @@ DEFINE_STATIC_PER_THREAD_DATA(uint32_t, recirc_depth, 0)
 #define RECIRC_ID_PUSH_VXLAN 0xFF000001
 
 /* Configuration parameters. */
-enum { MAX_FLOWS = 65536 };     /* Maximum number of flows in flow table. */
+enum { MAX_FLOWS = 200000 };     /* Maximum number of flows in flow table. */
 enum { MAX_METERS = 65536 };    /* Maximum number of meters. */
 enum { MAX_BANDS = 8 };         /* Maximum number of bands / meter. */
 enum { N_METER_LOCKS = 64 };    /* Maximum number of meters. */

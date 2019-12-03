@@ -412,6 +412,7 @@ static dp_purge_callback dp_purge_cb;
 static atomic_bool enable_megaflows = ATOMIC_VAR_INIT(true);
 static atomic_bool enable_ufid = ATOMIC_VAR_INIT(true);
 
+static bool flow_limit_set_force = false;
 void
 udpif_init(void)
 {
@@ -972,8 +973,11 @@ udpif_revalidator(void *arg)
                        flow_limit < n_flows * 1000 / duration) {
                 flow_limit += 1000;
             }
-            flow_limit = MIN(ofproto_flow_limit, MAX(flow_limit, 1000));
-            atomic_store_relaxed(&udpif->flow_limit, flow_limit);
+
+            if (!flow_limit_set_force) {
+                flow_limit = MIN(ofproto_flow_limit, MAX(flow_limit, 1000));
+                atomic_store_relaxed(&udpif->flow_limit, flow_limit);
+            }
 
             if (duration > 2000) {
                 VLOG_INFO("Spent an unreasonably long %lldms dumping flows",
@@ -2974,6 +2978,9 @@ upcall_unixctl_set_flow_limit(struct unixctl_conn *conn,
     unsigned int flow_limit = atoi(argv[1]);
 
     LIST_FOR_EACH (udpif, list_node, &all_udpifs) {
+        flow_limit_set_force = false;
+        if (flow_limit != ofproto_flow_limit)
+            flow_limit_set_force = true;
         atomic_store_relaxed(&udpif->flow_limit, flow_limit);
     }
     ds_put_format(&ds, "set flow_limit to %u\n", flow_limit);
