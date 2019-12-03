@@ -8073,9 +8073,10 @@ dpcls_find_subtable(struct dpcls *cls, const struct netdev_flow_key *mask, bool 
 
     CMAP_FOR_EACH_WITH_HASH (subtable, cmap_node, mask->hash,
                              &cls->subtables_map) {
-        if (subtable->is_appctl != is_appctl || subtable->priority != priority)
+        if (subtable->is_appctl != is_appctl
+            || (is_appctl && subtable->priority != SUBTABLE_PRIORITY(priority))
+            || ((!is_appctl && subtable->priority != priority)))
             continue;
-
 
         if (netdev_flow_key_equal(&subtable->mask, mask)) {
             return subtable;
