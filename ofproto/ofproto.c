@@ -8108,7 +8108,7 @@ do_bundle_commit(struct ofconn *ofconn, uint32_t id, uint16_t flags)
             /* Send error referring to the original message. */
             ofconn_send_error(ofconn, be->msg, error);
             error = OFPERR_OFPBFC_MSG_FAILED;
- 
+
             /* 2. Revert.  Undo all the changes made above. */
             LIST_FOR_EACH_REVERSE_CONTINUE(be, node, &bundle->msg_list) {
                 if (be->type == OFPTYPE_FLOW_MOD) {
@@ -8166,7 +8166,7 @@ do_bundle_commit(struct ofconn *ofconn, uint32_t id, uint16_t flags)
                 /* Send error referring to the original message. */
                 ofconn_send_error(ofconn, be->msg, error);
                 error = OFPERR_OFPBFC_MSG_FAILED;
-                
+
                 /* Revert.  Undo all the changes made above. */
                 LIST_FOR_EACH_REVERSE_CONTINUE (be, node, &bundle->msg_list) {
                     if (be->type == OFPTYPE_FLOW_MOD) {

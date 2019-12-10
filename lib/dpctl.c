@@ -258,7 +258,7 @@ __dpctl_qos_param_parse(char *option, struct ovs_qos_param *param, struct dpctl_
     char *save = NULL;
     char *key = strtok_r(option, "=", &save);
     char *value = strtok_r(NULL, "", &save);
-    
+
     if (!key || !value)
         return -1;
 
@@ -267,7 +267,7 @@ __dpctl_qos_param_parse(char *option, struct ovs_qos_param *param, struct dpctl_
             dpctl_error(dpctl_p, -1, "qos dst duplicated\n");
             return -1;
         }
-        
+
         char *ip = strtok_r(value, "/", &save);
         char *mask = strtok_r(NULL, "", &save);
         ovs_be32 tmp;
@@ -276,7 +276,7 @@ __dpctl_qos_param_parse(char *option, struct ovs_qos_param *param, struct dpctl_
             dpctl_error(dpctl_p, -1, "parse dst %s fail\n", ip);
             return -1;
         }
-        
+
         param->match.dst = ntohl(tmp);
 
         if (!mask) {
@@ -285,16 +285,16 @@ __dpctl_qos_param_parse(char *option, struct ovs_qos_param *param, struct dpctl_
             dpctl_error(dpctl_p, -1, "parse mask %s fail\n", mask);
             return -1;
         }
-        
+
         param->mask.dst = ntohl(tmp);
-        
+
         return 0;
     } else if (!strcmp(key, "rate")) {
         if (param->rate) {
             dpctl_error(dpctl_p, -1, "qos rate duplicated\n");
             return -1;
         }
-        
+
         param->rate = atoi(value);
         return 0;
     } else if (!strcmp(key, "reg")) {
@@ -302,7 +302,7 @@ __dpctl_qos_param_parse(char *option, struct ovs_qos_param *param, struct dpctl_
             dpctl_error(dpctl_p, -1, "qos reg duplicated\n");
             return -1;
         }
-        
+
         param->match.reg = atoi(value);
         return 0;
 
@@ -311,7 +311,7 @@ __dpctl_qos_param_parse(char *option, struct ovs_qos_param *param, struct dpctl_
             dpctl_error(dpctl_p, -1, "qos dir duplicated");
             return -1;
         }
-        
+
         if (!strcmp(value, "input")) {
             param->match.dir = OVS_QOS_DIR_INPUT;
         } else if (!strcmp(value, "output")) {
@@ -320,7 +320,7 @@ __dpctl_qos_param_parse(char *option, struct ovs_qos_param *param, struct dpctl_
             dpctl_error(dpctl_p, -1, "qos dir should be input or output\n");
             return -1;
         }
-        
+
         return 0;
     } else {
             dpctl_error(dpctl_p, -1, "%s not supported\n", key);
@@ -362,7 +362,7 @@ dpctl_add_qos(int argc OVS_UNUSED, const char *argv[],
     match.dst = param.match.dst & param.mask.dst;
     match.reg = param.match.reg;
     match.dir = param.match.dir;
-    
+
     if (ovs_qos_key_lookup(&match)) {
         dpctl_error(dpctl_p, -1, "the qos rule exist.\n");
         goto err;
@@ -415,14 +415,14 @@ dpctl_del_qos(int argc OVS_UNUSED, const char *argv[],
     match.dst = param.match.dst & param.mask.dst;
     match.reg = param.match.reg;
     match.dir = param.match.dir;
-    
+
     struct ovs_qos_node *n = ovs_qos_key_lookup(&match);
-    
+
     if (!n) {
         dpctl_error(dpctl_p, -1, "the qos rule don't exist.\n");
         goto err;
     }
-    
+
     ovs_qos_key_remove(n);
     ovs_qos_mask_destroy(n->mask);
     ovs_qos_key_destroy(n);
