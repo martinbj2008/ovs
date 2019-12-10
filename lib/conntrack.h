@@ -95,7 +95,7 @@ struct nat_action_info_t {
     uint16_t min_port;
     uint16_t max_port;
     uint16_t nat_action;
-    uint16_t zone;
+    uint32_t zone;
     char pool_name[33];
     struct nat_rs_pack_t nat_rs_pack;
 };
@@ -104,7 +104,7 @@ struct conntrack *conntrack_init(void);
 void conntrack_destroy(struct conntrack *);
 
 int conntrack_execute(struct conntrack *ct, struct dp_packet_batch *pkt_batch,
-                      ovs_be16 dl_type, bool force, bool commit, uint16_t zone,
+                      ovs_be16 dl_type, bool force, bool commit, uint32_t zone,
                       const uint32_t *setmark,
                       const struct ovs_key_ct_labels *setlabel,
                       ovs_be16 tp_src, ovs_be16 tp_dst, const char *helper,
@@ -117,20 +117,20 @@ struct conntrack_dump {
     unsigned bucket;
     struct cmap_position cm_pos;
     bool filter_zone;
-    uint16_t zone;
+    uint32_t zone;
 };
 
 struct ct_dpif_entry;
 struct ct_dpif_tuple;
 
 int conntrack_dump_start(struct conntrack *, struct conntrack_dump *,
-                         const uint16_t *pzone, int *);
+                         const uint32_t *pzone, int *);
 int conntrack_dump_next(struct conntrack_dump *, struct ct_dpif_entry *);
 int conntrack_dump_done(struct conntrack_dump *);
 
-int conntrack_flush(struct conntrack *, const uint16_t *zone);
+int conntrack_flush(struct conntrack *, const uint32_t *zone);
 int conntrack_flush_tuple(struct conntrack *, const struct ct_dpif_tuple *,
-                          uint16_t zone);
+                          uint32_t zone);
 int conntrack_set_maxconns(struct conntrack *ct, uint32_t maxconns);
 int conntrack_get_maxconns(struct conntrack *ct, uint32_t *maxconns);
 int conntrack_get_nconns(struct conntrack *ct, uint32_t *nconns);

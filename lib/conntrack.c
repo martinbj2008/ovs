@@ -78,7 +78,7 @@ enum ct_alg_ctl_type {
 
 static bool conn_key_extract(struct conntrack *, struct dp_packet *,
                              ovs_be16 dl_type, struct conn_lookup_ctx *,
-                             uint16_t zone);
+                             uint32_t zone);
 static uint32_t conn_key_hash(const struct conn_key *, uint32_t basis);
 static void conn_key_reverse(struct conn_key *);
 static bool valid_new(struct dp_packet *pkt, struct conn_key *);
@@ -251,7 +251,7 @@ ct_print_conn_info(const struct conn *c, const char *log_msg,
                     "ip "IP_FMT" rev dst ip "IP_FMT" src/dst ports "
                     "%"PRIu16"/%"PRIu16" rev src/dst ports "
                     "%"PRIu16"/%"PRIu16" zone/rev zone "
-                    "%"PRIu16"/%"PRIu16" nw_proto/rev nw_proto "
+                    "%"PRIu32"/%"PRIu32" nw_proto/rev nw_proto "
                     "%"PRIu8"/%"PRIu8, log_msg,
                     IP_ARGS(c->key.src.addr.ipv4),
                     IP_ARGS(c->key.dst.addr.ipv4),
@@ -276,7 +276,7 @@ ct_print_conn_info(const struct conn *c, const char *log_msg,
             CT_VLOG(rl_on, vll, "%s: src ip %s dst ip %s rev src ip %s"
                     " rev dst ip %s src/dst ports %"PRIu16"/%"PRIu16
                     " rev src/dst ports %"PRIu16"/%"PRIu16" zone/rev zone "
-                    "%"PRIu16"/%"PRIu16" nw_proto/rev nw_proto "
+                    "%"PRIu32"/%"PRIu32" nw_proto/rev nw_proto "
                     "%"PRIu8"/%"PRIu8, log_msg, ip6_s, ip6_d, ip6_rs,
                     ip6_rd, ntohs(c->key.src.port), ntohs(c->key.dst.port),
                     ntohs(c->rev_key.src.port), ntohs(c->rev_key.dst.port),
@@ -440,7 +440,7 @@ conn_lookup(struct conntrack *ct, const struct conn_key *key,
 }
 
 static void
-write_ct_md(struct dp_packet *pkt, uint16_t zone, const struct conn *conn,
+write_ct_md(struct dp_packet *pkt, uint32_t zone, const struct conn *conn,
             const struct conn_key *key, const struct alg_exp_node *alg_exp)
 {
     pkt->md.ct_state |= CS_TRACKED;
@@ -1009,7 +1009,7 @@ conn_update_state(struct conntrack *ct, struct dp_packet *pkt,
 
 static void
 handle_nat(struct dp_packet *pkt, struct conn *conn,
-           uint16_t zone, bool reply, bool related)
+           uint32_t zone, bool reply, bool related)
 {
     if (conn->nat_info &&
         (!(pkt->md.ct_state & (CS_SRC_NAT | CS_DST_NAT)) ||
@@ -1118,7 +1118,7 @@ conn_update_state_alg(struct conntrack *ct, struct dp_packet *pkt,
 
 static void
 process_one(struct conntrack *ct, struct dp_packet *pkt,
-            struct conn_lookup_ctx *ctx, uint16_t zone,
+            struct conn_lookup_ctx *ctx, uint32_t zone,
             bool force, bool commit, long long now, const uint32_t *setmark,
             const struct ovs_key_ct_labels *setlabel,
             const struct nat_action_info_t *nat_action_info,
@@ -1229,7 +1229,7 @@ process_one(struct conntrack *ct, struct dp_packet *pkt,
  * 'setlabel' behaves similarly for the connection label.*/
 int
 conntrack_execute(struct conntrack *ct, struct dp_packet_batch *pkt_batch,
-                  ovs_be16 dl_type, bool force, bool commit, uint16_t zone,
+                  ovs_be16 dl_type, bool force, bool commit, uint32_t zone,
                   const uint32_t *setmark,
                   const struct ovs_key_ct_labels *setlabel,
                   ovs_be16 tp_src, ovs_be16 tp_dst, const char *helper,
@@ -1808,7 +1808,7 @@ extract_l4(struct conn_key *key, const void *data, size_t size, bool *related,
 
 static bool
 conn_key_extract(struct conntrack *ct, struct dp_packet *pkt, ovs_be16 dl_type,
-                 struct conn_lookup_ctx *ctx, uint16_t zone)
+                 struct conn_lookup_ctx *ctx, uint32_t zone)
 {
     const struct eth_header *l2 = dp_packet_eth(pkt);
     const struct ip_header *l3 = dp_packet_l3(pkt);
@@ -2279,7 +2279,7 @@ conn_key_to_tuple(const struct conn_key *key, struct ct_dpif_tuple *tuple)
 }
 
 static void
-tuple_to_conn_key(const struct ct_dpif_tuple *tuple, uint16_t zone,
+tuple_to_conn_key(const struct ct_dpif_tuple *tuple, uint32_t zone,
                   struct conn_key *key)
 {
     if (tuple->l3_type == AF_INET) {
@@ -2345,7 +2345,7 @@ conntrack_ipf_ctx(struct conntrack *ct)
 
 int
 conntrack_dump_start(struct conntrack *ct, struct conntrack_dump *dump,
-                     const uint16_t *pzone, int *ptot_bkts)
+                     const uint32_t *pzone, int *ptot_bkts)
 {
     memset(dump, 0, sizeof(*dump));
 
@@ -2390,7 +2390,7 @@ conntrack_dump_done(struct conntrack_dump *dump OVS_UNUSED)
 }
 
 int
-conntrack_flush(struct conntrack *ct, const uint16_t *zone)
+conntrack_flush(struct conntrack *ct, const uint32_t *zone)
 {
     struct conn *conn;
 
@@ -2407,7 +2407,7 @@ conntrack_flush(struct conntrack *ct, const uint16_t *zone)
 
 int
 conntrack_flush_tuple(struct conntrack *ct, const struct ct_dpif_tuple *tuple,
-                      uint16_t zone)
+                      uint32_t zone)
 {
     int error = 0;
     struct conn_key key;

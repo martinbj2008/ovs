@@ -79,7 +79,7 @@ static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
 static const struct nl_policy nfnlgrp_conntrack_policy[] = {
     [CTA_TUPLE_ORIG] = { .type = NL_A_NESTED, .optional = false },
     [CTA_TUPLE_REPLY] = { .type = NL_A_NESTED, .optional = false },
-    [CTA_ZONE] = { .type = NL_A_BE16, .optional = true },
+    [CTA_ZONE] = { .type = NL_A_BE32, .optional = true },
     [CTA_STATUS] = { .type = NL_A_BE32, .optional = false },
     [CTA_TIMESTAMP] = { .type = NL_A_NESTED, .optional = true },
     [CTA_TIMEOUT] = { .type = NL_A_BE32, .optional = true },
@@ -119,14 +119,14 @@ struct nl_ct_dump_state {
     struct nl_dump dump;
     struct ofpbuf buf;
     bool filter_zone;
-    uint16_t zone;
+    uint32_t zone;
 };
 
 /* Conntrack netlink dumping. */
 
 /* Initialize a conntrack netlink dump. */
 int
-nl_ct_dump_start(struct nl_ct_dump_state **statep, const uint16_t *zone,
+nl_ct_dump_start(struct nl_ct_dump_state **statep, const uint32_t *zone,
         int *ptot_bkts)
 {
     struct nl_ct_dump_state *state;
@@ -176,8 +176,8 @@ nl_ct_dump_next(struct nl_ct_dump_state *state, struct ct_dpif_entry *entry)
         };
 
         if (state->filter_zone) {
-            uint16_t entry_zone = attrs[CTA_ZONE]
-                                  ? ntohs(nl_attr_get_be16(attrs[CTA_ZONE]))
+            uint32_t entry_zone = attrs[CTA_ZONE]
+                                  ? ntohs(nl_attr_get_be32(attrs[CTA_ZONE]))
                                   : 0;
             if (entry_zone != state->zone) {
                 continue;
@@ -243,7 +243,7 @@ nl_ct_flush(void)
 }
 
 int
-nl_ct_flush_tuple(const struct ct_dpif_tuple *tuple, uint16_t zone)
+nl_ct_flush_tuple(const struct ct_dpif_tuple *tuple, uint32_t zone)
 {
     int err;
     struct ofpbuf buf;
@@ -252,7 +252,7 @@ nl_ct_flush_tuple(const struct ct_dpif_tuple *tuple, uint16_t zone)
     nl_msg_put_nfgenmsg(&buf, 0, tuple->l3_type, NFNL_SUBSYS_CTNETLINK,
                         IPCTNL_MSG_CT_DELETE, NLM_F_REQUEST);
 
-    nl_msg_put_be16(&buf, CTA_ZONE, htons(zone));
+    nl_msg_put_be32(&buf, CTA_ZONE, htonl(zone));
     if (!nl_ct_put_ct_tuple(&buf, tuple, CTA_TUPLE_ORIG)) {
         err = EOPNOTSUPP;
         goto out;
@@ -265,7 +265,7 @@ out:
 
 #ifdef _WIN32
 int
-nl_ct_flush_zone(uint16_t flush_zone)
+nl_ct_flush_zone(uint32_t flush_zone)
 {
     /* Windows can flush a specific zone */
     struct ofpbuf buf;
@@ -275,7 +275,7 @@ nl_ct_flush_zone(uint16_t flush_zone)
 
     nl_msg_put_nfgenmsg(&buf, 0, AF_UNSPEC, NFNL_SUBSYS_CTNETLINK,
                         IPCTNL_MSG_CT_DELETE, NLM_F_REQUEST);
-    nl_msg_put_be16(&buf, CTA_ZONE, htons(flush_zone));
+    nl_msg_put_be32(&buf, CTA_ZONE, htonl(flush_zone));
 
     err = nl_transact(NETLINK_NETFILTER, &buf, NULL);
     ofpbuf_uninit(&buf);
@@ -284,7 +284,7 @@ nl_ct_flush_zone(uint16_t flush_zone)
 }
 #else
 int
-nl_ct_flush_zone(uint16_t flush_zone)
+nl_ct_flush_zone(uint32_t flush_zone)
 {
     /* Apparently, there's no netlink interface to flush a specific zone.
      * This code dumps every connection, checks the zone and eventually
@@ -307,7 +307,7 @@ nl_ct_flush_zone(uint16_t flush_zone)
         struct nlattr *attrs[ARRAY_SIZE(nfnlgrp_conntrack_policy)];
         enum nl_ct_event_type event_type;
         uint8_t nfgen_family;
-        uint16_t zone = 0;
+        uint32_t zone = 0;
 
         if (!nl_dump_next(&dump, &reply, &buf)) {
             break;
@@ -319,7 +319,7 @@ nl_ct_flush_zone(uint16_t flush_zone)
         };
 
         if (attrs[CTA_ZONE]) {
-            zone = ntohs(nl_attr_get_be16(attrs[CTA_ZONE]));
+            zone = ntohl(nl_attr_get_be32(attrs[CTA_ZONE]));
         }
 
         if (zone != flush_zone) {
@@ -329,7 +329,7 @@ nl_ct_flush_zone(uint16_t flush_zone)
         nl_msg_put_nfgenmsg(&delete, 0, nfgen_family, NFNL_SUBSYS_CTNETLINK,
                             IPCTNL_MSG_CT_DELETE, NLM_F_REQUEST);
 
-        nl_msg_put_be16(&delete, CTA_ZONE, htons(zone));
+        nl_msg_put_be32(&delete, CTA_ZONE, htonl(zone));
         nl_msg_put_unspec(&delete, CTA_TUPLE_ORIG, attrs[CTA_TUPLE_ORIG] + 1,
                           attrs[CTA_TUPLE_ORIG]->nla_len - NLA_HDRLEN);
         nl_msg_put_unspec(&delete, CTA_ID, attrs[CTA_ID] + 1,
@@ -936,7 +936,7 @@ nl_ct_attrs_to_ct_dpif_entry(struct ct_dpif_entry *entry,
         entry->id = ntohl(nl_attr_get_be32(attrs[CTA_ID]));
     }
     if (attrs[CTA_ZONE]) {
-        entry->zone = ntohs(nl_attr_get_be16(attrs[CTA_ZONE]));
+        entry->zone = ntohl(nl_attr_get_be32(attrs[CTA_ZONE]));
     }
     if (attrs[CTA_STATUS]) {
         entry->status = ips_status_to_dpif_flags(

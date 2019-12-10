@@ -5080,7 +5080,7 @@ type_set_config(const char *type, const struct smap *other_config)
 }
 
 static void
-ct_flush(const struct ofproto *ofproto_, const uint16_t *zone)
+ct_flush(const struct ofproto *ofproto_, const uint32_t *zone)
 {
     struct ofproto_dpif *ofproto = ofproto_dpif_cast(ofproto_);
 

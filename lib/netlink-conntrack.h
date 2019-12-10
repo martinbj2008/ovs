@@ -35,14 +35,14 @@ enum nl_ct_event_type {
 
 struct nl_ct_dump_state;
 
-int nl_ct_dump_start(struct nl_ct_dump_state **, const uint16_t *zone,
+int nl_ct_dump_start(struct nl_ct_dump_state **, const uint32_t *zone,
         int *ptot_bkts);
 int nl_ct_dump_next(struct nl_ct_dump_state *, struct ct_dpif_entry *);
 int nl_ct_dump_done(struct nl_ct_dump_state *);
 
 int nl_ct_flush(void);
-int nl_ct_flush_zone(uint16_t zone);
-int nl_ct_flush_tuple(const struct ct_dpif_tuple *, uint16_t zone);
+int nl_ct_flush_zone(uint32_t zone);
+int nl_ct_flush_tuple(const struct ct_dpif_tuple *, uint32_t zone);
 
 bool nl_ct_parse_entry(struct ofpbuf *, struct ct_dpif_entry *,
                        enum nl_ct_event_type *);

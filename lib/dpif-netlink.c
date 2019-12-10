@@ -2787,7 +2787,7 @@ struct dpif_netlink_ct_dump_state {
 static int
 dpif_netlink_ct_dump_start(struct dpif *dpif OVS_UNUSED,
                            struct ct_dpif_dump_state **dump_,
-                           const uint16_t *zone, int *ptot_bkts)
+                           const uint32_t *zone, int *ptot_bkts)
 {
     struct dpif_netlink_ct_dump_state *dump;
     int err;
@@ -2831,7 +2831,7 @@ dpif_netlink_ct_dump_done(struct dpif *dpif OVS_UNUSED,
 }
 
 static int
-dpif_netlink_ct_flush(struct dpif *dpif OVS_UNUSED, const uint16_t *zone,
+dpif_netlink_ct_flush(struct dpif *dpif OVS_UNUSED, const uint32_t *zone,
                       const struct ct_dpif_tuple *tuple)
 {
     if (tuple) {

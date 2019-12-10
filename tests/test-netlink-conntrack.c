@@ -103,13 +103,13 @@ static void
 test_nl_ct_dump(struct ovs_cmdl_context *ctx)
 {
     struct nl_ct_dump_state *dump;
-    uint16_t zone, *pzone = NULL;
+    uint32_t zone, *pzone = NULL;
     struct ct_dpif_entry entry;
     int err;
     int tot_bkts;
 
     if (ctx->argc >= 2) {
-        if (!ovs_scan(ctx->argv[1], "zone=%"SCNu16, &zone)) {
+        if (!ovs_scan(ctx->argv[1], "zone=%"SCNu32, &zone)) {
             ovs_fatal(0, "Error parsing zone= specifier");
         }
         pzone = &zone;

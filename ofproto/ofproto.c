@@ -913,7 +913,7 @@ handle_nxt_ct_flush_zone(struct ofconn *ofconn, const struct ofp_header *oh)
         return OFPERR_NXBRC_MUST_BE_ZERO;
     }
 
-    uint16_t zone = ntohs(nzi->zone_id);
+    uint32_t zone = ntohl(nzi->zone_id);
     if (ofproto->ofproto_class->ct_flush) {
         ofproto->ofproto_class->ct_flush(ofproto, &zone);
     } else {
@@ -6122,7 +6122,7 @@ handle_flow_mod__(struct ofproto *ofproto, const struct ofputil_flow_mod *fm,
     error = ofproto_flow_mod_start(ofproto, &ofm);
     if (!error) {
         ofproto_bump_tables_version(ofproto);
-        error = ofproto_flow_mod_finish(ofproto, &ofm, req);        
+        error = ofproto_flow_mod_finish(ofproto, &ofm, req);
         ofmonitor_flush(ofproto->connmgr);
     }
     ovs_mutex_unlock(&ofproto_mutex);

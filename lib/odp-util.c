@@ -790,7 +790,7 @@ static const struct nl_policy ovs_nat_policy[] = {
     [OVS_NAT_ATTR_PERSISTENT] = { .type = NL_A_FLAG, .optional = true, },
     [OVS_NAT_ATTR_PROTO_HASH] = { .type = NL_A_FLAG, .optional = true, },
     [OVS_NAT_ATTR_PROTO_RANDOM] = { .type = NL_A_FLAG, .optional = true, },
-    [OVS_NAT_ATTR_ZONE] = { .type = NL_A_U16, .optional = true, },
+    [OVS_NAT_ATTR_ZONE] = { .type = NL_A_U32, .optional = true, },
     [OVS_NAT_ATTR_RS] = { .type = NL_A_UNSPEC, .optional = true, },
     [OVS_NAT_ATTR_POOL] = { .type = NL_A_UNSPEC, .optional = true, },
 };
@@ -813,7 +813,7 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
     ovs_be32 ip_min, ip_max;
     struct in6_addr ip6_min, ip6_max;
     uint16_t proto_min, proto_max;
-    uint16_t zone;
+    uint32_t zone;
     struct nat_rs_pack_t *rs_pack;
     char *pool_name;
 
@@ -887,7 +887,7 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
     }
 
     zone = a[OVS_NAT_ATTR_ZONE]
-        ? nl_attr_get_u16(a[OVS_NAT_ATTR_ZONE]) : 0;
+        ? nl_attr_get_u32(a[OVS_NAT_ATTR_ZONE]) : 0;
 
     rs_pack = a[OVS_NAT_ATTR_RS]
         ? (struct nat_rs_pack_t *)nl_attr_get(a[OVS_NAT_ATTR_RS]) : NULL;
@@ -941,7 +941,7 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
             ds_put_cstr(ds, "random,");
         }
         if (a[OVS_NAT_ATTR_ZONE]) {
-            ds_put_format(ds, "zone=%"PRIu16, zone);
+            ds_put_format(ds, "zone=%"PRIu32, zone);
             ds_put_char(ds, ',');
         }
         if (a[OVS_NAT_ATTR_RS]) {
@@ -969,7 +969,7 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
 static const struct nl_policy ovs_conntrack_policy[] = {
     [OVS_CT_ATTR_COMMIT] = { .type = NL_A_FLAG, .optional = true, },
     [OVS_CT_ATTR_FORCE_COMMIT] = { .type = NL_A_FLAG, .optional = true, },
-    [OVS_CT_ATTR_ZONE] = { .type = NL_A_U16, .optional = true, },
+    [OVS_CT_ATTR_ZONE] = { .type = NL_A_U32, .optional = true, },
     [OVS_CT_ATTR_MARK] = { .type = NL_A_UNSPEC, .optional = true,
                            .min_len = sizeof(uint32_t) * 2 },
     [OVS_CT_ATTR_LABELS] = { .type = NL_A_UNSPEC, .optional = true,
@@ -989,7 +989,7 @@ format_odp_conntrack_action(struct ds *ds, const struct nlattr *attr)
     } *label;
     const uint32_t *mark;
     const char *helper;
-    uint16_t zone;
+    uint32_t zone;
     bool commit, force;
     const struct nlattr *nat;
 
@@ -1000,7 +1000,7 @@ format_odp_conntrack_action(struct ds *ds, const struct nlattr *attr)
 
     commit = a[OVS_CT_ATTR_COMMIT] ? true : false;
     force = a[OVS_CT_ATTR_FORCE_COMMIT] ? true : false;
-    zone = a[OVS_CT_ATTR_ZONE] ? nl_attr_get_u16(a[OVS_CT_ATTR_ZONE]) : 0;
+    zone = a[OVS_CT_ATTR_ZONE] ? nl_attr_get_u32(a[OVS_CT_ATTR_ZONE]) : 0;
     mark = a[OVS_CT_ATTR_MARK] ? nl_attr_get(a[OVS_CT_ATTR_MARK]) : NULL;
     label = a[OVS_CT_ATTR_LABELS] ? nl_attr_get(a[OVS_CT_ATTR_LABELS]): NULL;
     helper = a[OVS_CT_ATTR_HELPER] ? nl_attr_get(a[OVS_CT_ATTR_HELPER]) : NULL;
@@ -1016,7 +1016,7 @@ format_odp_conntrack_action(struct ds *ds, const struct nlattr *attr)
             ds_put_format(ds, "force_commit,");
         }
         if (zone) {
-            ds_put_format(ds, "zone=%"PRIu16",", zone);
+            ds_put_format(ds, "zone=%"PRIu32",", zone);
         }
         if (mark) {
             ds_put_format(ds, "mark=%#"PRIx32"/%#"PRIx32",", *mark,
@@ -1801,7 +1801,7 @@ struct ct_nat_params {
     bool persistent;
     bool proto_hash;
     bool proto_random;
-    uint16_t zone;
+    uint32_t zone;
     char pool_name[33];
     struct nat_rs_pack_t rs_pack;
 };
@@ -1933,7 +1933,7 @@ find_end:
                     p->proto_random = true;
                     continue;
                 }
-                if (ovs_scan_len(s, &n, "zone=%"SCNu16, &p->zone)) {
+                if (ovs_scan_len(s, &n, "zone=%"SCNu32, &p->zone)) {
                     continue;
                 }
                 if(ovs_scan_len(s, &n, "pool(")) {
@@ -2010,7 +2010,7 @@ nl_msg_put_ct_nat(struct ct_nat_params *p, struct ofpbuf *actions)
     }
 
     if(p->zone) {
-        nl_msg_put_u16(actions, OVS_NAT_ATTR_ZONE, p->zone);
+        nl_msg_put_u32(actions, OVS_NAT_ATTR_ZONE, p->zone);
     }
 
     if (p->addr_len != 0) {
@@ -2050,7 +2050,7 @@ parse_conntrack_action(const char *s_, struct ofpbuf *actions)
         size_t helper_len = 0;
         bool commit = false;
         bool force_commit = false;
-        uint16_t zone = 0;
+        uint32_t zone = 0;
         struct {
             uint32_t value;
             uint32_t mask;
@@ -2090,7 +2090,7 @@ find_end:
                     s += n;
                     continue;
                 }
-                if (ovs_scan(s, "zone=%"SCNu16"%n", &zone, &n)) {
+                if (ovs_scan(s, "zone=%"SCNu32"%n", &zone, &n)) {
                     s += n;
                     continue;
                 }
@@ -2151,7 +2151,7 @@ find_end:
             nl_msg_put_flag(actions, OVS_CT_ATTR_FORCE_COMMIT);
         }
         if (zone) {
-            nl_msg_put_u16(actions, OVS_CT_ATTR_ZONE, zone);
+            nl_msg_put_u32(actions, OVS_CT_ATTR_ZONE, zone);
         }
         if (ct_mark.mask) {
             nl_msg_put_unspec(actions, OVS_CT_ATTR_MARK, &ct_mark,

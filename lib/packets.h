@@ -104,7 +104,7 @@ PADDED_MEMBERS_CACHELINE_MARKER(CACHE_LINE_SIZE, cacheline0,
     uint32_t pkt_mark;          /* Packet mark. */
     uint8_t  ct_state;          /* Connection state. */
     bool ct_orig_tuple_ipv6;
-    uint16_t ct_zone;           /* Connection zone. */
+    uint32_t ct_zone;           /* Connection zone. */
     uint32_t ct_mark;           /* Connection mark. */
     ovs_u128 ct_label;          /* Connection label. */
     union flow_in_port in_port; /* Input port. */

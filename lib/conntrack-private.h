@@ -55,7 +55,7 @@ struct conn_key {
     struct ct_endpoint dst;
 
     ovs_be16 dl_type;
-    uint16_t zone;
+    uint32_t zone;
     uint8_t nw_proto;
 };
 

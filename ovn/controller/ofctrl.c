@@ -896,7 +896,7 @@ add_meter_mod(const struct ofputil_meter_mod *mm, struct ovs_list *msgs)
 }
 
 static void
-add_ct_flush_zone(uint16_t zone_id, struct ovs_list *msgs)
+add_ct_flush_zone(uint32_t zone_id, struct ovs_list *msgs)
 {
     struct ofpbuf *msg = ofpraw_alloc(OFPRAW_NXT_CT_FLUSH_ZONE,
                                       rconn_get_version(swconn), 0);

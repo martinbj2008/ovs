@@ -69,7 +69,7 @@ static const struct flags ct_dpif_status_flags[] = {
  * that represents the error.  Otherwise it returns zero. */
 int
 ct_dpif_dump_start(struct dpif *dpif, struct ct_dpif_dump_state **dump,
-                   const uint16_t *zone, int *ptot_bkts)
+                   const uint32_t *zone, int *ptot_bkts)
 {
     int err;
 
@@ -123,7 +123,7 @@ ct_dpif_dump_done(struct ct_dpif_dump_state *dump)
  *   - If 'tuple' is not NULL, flush the conntrack entry specified by 'tuple'
  *     in '*zone'. If 'zone' is NULL, use the default zone (zone 0). */
 int
-ct_dpif_flush(struct dpif *dpif, const uint16_t *zone,
+ct_dpif_flush(struct dpif *dpif, const uint32_t *zone,
               const struct ct_dpif_tuple *tuple)
 {
     if (tuple) {
@@ -133,7 +133,7 @@ ct_dpif_flush(struct dpif *dpif, const uint16_t *zone,
                                                 zone ? *zone : 0);
         ds_destroy(&ds);
     } else if (zone) {
-        VLOG_DBG("%s: ct_flush: zone %"PRIu16, dpif_name(dpif), *zone);
+        VLOG_DBG("%s: ct_flush: zone %"PRIu32, dpif_name(dpif), *zone);
     } else {
         VLOG_DBG("%s: ct_flush: <all>", dpif_name(dpif));
     }
@@ -290,7 +290,7 @@ ct_dpif_format_entry(const struct ct_dpif_entry *entry, struct ds *ds,
         ds_put_format(ds, ",id=%"PRIu32, entry->id);
     }
     if (entry->zone) {
-        ds_put_format(ds, ",zone=%"PRIu16, entry->zone);
+        ds_put_format(ds, ",zone=%"PRIu32, entry->zone);
     }
     if (verbose) {
         ct_dpif_format_flags(ds, ",status=", entry->status,
@@ -677,7 +677,7 @@ error:
 }
 
 void
-ct_dpif_push_zone_limit(struct ovs_list *zone_limits, uint16_t zone,
+ct_dpif_push_zone_limit(struct ovs_list *zone_limits, uint32_t zone,
                         uint32_t limit, uint32_t count)
 {
     struct ct_dpif_zone_limit *zone_limit = xmalloc(sizeof *zone_limit);
@@ -702,7 +702,7 @@ ct_dpif_free_zone_limits(struct ovs_list *zone_limits)
  * and '*plimit'.  Returns true on success.  Otherwise, returns false and
  * and puts the error message in 'ds'. */
 bool
-ct_dpif_parse_zone_limit_tuple(const char *s, uint16_t *pzone,
+ct_dpif_parse_zone_limit_tuple(const char *s, uint32_t *pzone,
                                uint32_t *plimit, struct ds *ds)
 {
     char *pos, *key, *value, *copy, *err;
@@ -716,7 +716,7 @@ ct_dpif_parse_zone_limit_tuple(const char *s, uint16_t *pzone,
         }
 
         if (!strcmp(key, "zone")) {
-            err = str_to_u16(value, key, pzone);
+            err = str_to_u32(value, pzone);
             if (err) {
                 free(err);
                 goto error_with_msg;
@@ -759,7 +759,7 @@ ct_dpif_format_zone_limits(uint32_t default_limit,
     ds_put_format(ds, "default limit=%"PRIu32, default_limit);
 
     LIST_FOR_EACH (zone_limit, node, zone_limits) {
-        ds_put_format(ds, "\nzone=%"PRIu16, zone_limit->zone);
+        ds_put_format(ds, "\nzone=%"PRIu32, zone_limit->zone);
         ds_put_format(ds, ",limit=%"PRIu32, zone_limit->limit);
         ds_put_format(ds, ",count=%"PRIu32, zone_limit->count);
     }

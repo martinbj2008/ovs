@@ -1624,12 +1624,12 @@ dpctl_dump_conntrack(int argc, const char *argv[],
 {
     struct ct_dpif_dump_state *dump;
     struct ct_dpif_entry cte;
-    uint16_t zone, *pzone = NULL;
+    uint32_t zone, *pzone = NULL;
     int tot_bkts;
     struct dpif *dpif;
     int error;
 
-    if (argc > 1 && ovs_scan(argv[argc - 1], "zone=%"SCNu16, &zone)) {
+    if (argc > 1 && ovs_scan(argv[argc - 1], "zone=%"SCNu32, &zone)) {
         pzone = &zone;
         argc--;
     }
@@ -1675,7 +1675,7 @@ dpctl_flush_conntrack(int argc, const char *argv[],
     struct dpif *dpif = NULL;
     struct ct_dpif_tuple tuple, *ptuple = NULL;
     struct ds ds = DS_EMPTY_INITIALIZER;
-    uint16_t zone, *pzone = NULL;
+    uint32_t zone, *pzone = NULL;
     int error;
     int args = argc - 1;
 
@@ -1686,7 +1686,7 @@ dpctl_flush_conntrack(int argc, const char *argv[],
     }
 
     /* Parse zone */
-    if (args && ovs_scan(argv[args], "zone=%"SCNu16, &zone)) {
+    if (args && ovs_scan(argv[args], "zone=%"SCNu32, &zone)) {
         pzone = &zone;
         args--;
     }
@@ -1725,7 +1725,7 @@ dpctl_ct_stats_show(int argc, const char *argv[],
     struct dpif *dpif;
     struct ct_dpif_dump_state *dump;
     struct ct_dpif_entry cte;
-    uint16_t zone, *pzone = NULL;
+    uint32_t zone, *pzone = NULL;
     int tot_bkts;
     int lastargc = 0;
 
@@ -1742,7 +1742,7 @@ dpctl_ct_stats_show(int argc, const char *argv[],
             verbose = true;
             argc--;
         } else if (!strncmp(argv[argc - 1], "zone=", 5)) {
-            if (ovs_scan(argv[argc - 1], "zone=%"SCNu16, &zone)) {
+            if (ovs_scan(argv[argc - 1], "zone=%"SCNu32, &zone)) {
                 pzone = &zone;
                 argc--;
             }
@@ -1864,7 +1864,7 @@ dpctl_ct_bkts(int argc, const char *argv[],
     struct ct_dpif_dump_state *dump;
     struct ct_dpif_entry cte;
     uint16_t gt = 0; /* Threshold: display value when greater than gt. */
-    uint16_t *pzone = NULL;
+    uint32_t *pzone = NULL;
     int tot_bkts = 0;
     int error;
 
@@ -2046,7 +2046,7 @@ dpctl_ct_set_limits(int argc, const char *argv[],
 
     /* Parse ct zone limit tuples */
     while (i < argc) {
-        uint16_t zone;
+        uint32_t zone;
         uint32_t limit;
         if (!ct_dpif_parse_zone_limit_tuple(argv[i++], &zone, &limit, &ds)) {
             error = EINVAL;
@@ -2077,7 +2077,7 @@ parse_ct_limit_zones(const char *argv, struct ovs_list *zone_limits,
                      struct ds *ds)
 {
     char *save_ptr = NULL, *argcopy, *next_zone;
-    uint16_t zone;
+    uint32_t zone;
 
     if (strncmp(argv, "zone=", 5)) {
         ds_put_format(ds, "invalid argument %s", argv);
@@ -2088,7 +2088,7 @@ parse_ct_limit_zones(const char *argv, struct ovs_list *zone_limits,
     next_zone = strtok_r(argcopy, ",", &save_ptr);
 
     do {
-        if (ovs_scan(next_zone, "%"SCNu16, &zone)) {
+        if (ovs_scan(next_zone, "%"SCNu32, &zone)) {
             ct_dpif_push_zone_limit(zone_limits, zone, 0, 0);
         } else {
             ds_put_cstr(ds, "invalid zone");

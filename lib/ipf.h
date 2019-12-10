@@ -43,7 +43,7 @@ struct ipf_status {
 struct ipf *ipf_init(void);
 void ipf_destroy(struct ipf *ipf);
 void ipf_preprocess_conntrack(struct ipf *ipf, struct dp_packet_batch *pb,
-                              long long now, ovs_be16 dl_type, uint16_t zone,
+                              long long now, ovs_be16 dl_type, uint32_t zone,
                               uint32_t hash_basis);
 
 void ipf_postprocess_conntrack(struct ipf *ipf, struct dp_packet_batch *pb,

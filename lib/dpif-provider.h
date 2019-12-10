@@ -446,7 +446,7 @@ struct dpif_class {
      * ct_dump_done() should perform any cleanup necessary (including
      * deallocating the 'state' structure, if applicable). */
     int (*ct_dump_start)(struct dpif *, struct ct_dpif_dump_state **state,
-                         const uint16_t *zone, int *);
+                         const uint32_t *zone, int *);
     int (*ct_dump_next)(struct dpif *, struct ct_dpif_dump_state *state,
                         struct ct_dpif_entry *entry);
     int (*ct_dump_done)(struct dpif *, struct ct_dpif_dump_state *state);
@@ -461,7 +461,7 @@ struct dpif_class {
      *   - If 'tuple' is not NULL, flush the conntrack entry specified by
      *     'tuple' in '*zone'. If 'zone' is NULL, use the default zone
      *     (zone 0). */
-    int (*ct_flush)(struct dpif *, const uint16_t *zone,
+    int (*ct_flush)(struct dpif *, const uint32_t *zone,
                     const struct ct_dpif_tuple *tuple);
     /* Set max connections allowed. */
     int (*ct_set_maxconns)(struct dpif *, uint32_t maxconns);

@@ -3002,8 +3002,8 @@ ofctl_dump_ipfix_bridge(struct ovs_cmdl_context *ctx)
 static void
 ofctl_ct_flush_zone(struct ovs_cmdl_context *ctx)
 {
-    uint16_t zone_id;
-    char *error = str_to_u16(ctx->argv[2], "zone_id", &zone_id);
+    uint32_t zone_id;
+    char *error = str_to_u32(ctx->argv[2], &zone_id);
     if (error) {
         ovs_fatal(0, "%s", error);
     }
@@ -3014,7 +3014,7 @@ ofctl_ct_flush_zone(struct ovs_cmdl_context *ctx)
 
     struct ofpbuf *msg = ofpraw_alloc(OFPRAW_NXT_CT_FLUSH_ZONE, version, 0);
     struct nx_zone_id *nzi = ofpbuf_put_zeros(msg, sizeof *nzi);
-    nzi->zone_id = htons(zone_id);
+    nzi->zone_id = htonl(zone_id);
 
     transact_noreply(vconn, msg);
     vconn_close(vconn);

@@ -7418,7 +7418,7 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
         bool force = false;
         bool commit = false;
         unsigned int left;
-        uint16_t zone = 0;
+        uint32_t zone = 0;
         const char *helper = NULL;
         const uint32_t *setmark = NULL;
         const struct ovs_key_ct_labels *setlabel = NULL;
@@ -7438,7 +7438,7 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
                 commit = true;
                 break;
             case OVS_CT_ATTR_ZONE:
-                zone = nl_attr_get_u16(b);
+                zone = nl_attr_get_u32(b);
                 break;
             case OVS_CT_ATTR_HELPER:
                 helper = nl_attr_get_string(b);
@@ -7502,7 +7502,7 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
                         break;
                     case OVS_NAT_ATTR_ZONE:
                         nat_action_info.zone =
-                            nl_attr_get_u16(b_nest);
+                            nl_attr_get_u32(b_nest);
                         break;
                     case OVS_NAT_ATTR_RS:
                         memcpy(&nat_action_info.nat_rs_pack,
@@ -7606,7 +7606,7 @@ struct dp_netdev_ct_dump {
 
 static int
 dpif_netdev_ct_dump_start(struct dpif *dpif, struct ct_dpif_dump_state **dump_,
-                          const uint16_t *pzone, int *ptot_bkts)
+                          const uint32_t *pzone, int *ptot_bkts)
 {
     struct dp_netdev *dp = get_dp_netdev(dpif);
     struct dp_netdev_ct_dump *dump;
@@ -7651,7 +7651,7 @@ dpif_netdev_ct_dump_done(struct dpif *dpif OVS_UNUSED,
 }
 
 static int
-dpif_netdev_ct_flush(struct dpif *dpif, const uint16_t *zone,
+dpif_netdev_ct_flush(struct dpif *dpif, const uint32_t *zone,
                      const struct ct_dpif_tuple *tuple)
 {
     struct dp_netdev *dp = get_dp_netdev(dpif);

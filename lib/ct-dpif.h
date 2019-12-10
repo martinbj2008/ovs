@@ -178,7 +178,7 @@ struct ct_dpif_entry {
     struct ct_dpif_tuple tuple_master;
     struct ct_dpif_helper helper;
     uint32_t id;
-    uint16_t zone;
+    uint32_t zone;
 
     /* Modifiable members. */
 
@@ -219,7 +219,7 @@ struct ct_dpif_dump_state {
 };
 
 struct ct_dpif_zone_limit {
-    uint16_t zone;
+    uint32_t zone;
     uint32_t limit;       /* Limit on number of entries. */
     uint32_t count;       /* Current number of entries. */
     struct ovs_list node;
@@ -238,10 +238,10 @@ struct ct_rs_pool_t {
 };
 
 int ct_dpif_dump_start(struct dpif *, struct ct_dpif_dump_state **,
-                       const uint16_t *zone, int *);
+                       const uint32_t *zone, int *);
 int ct_dpif_dump_next(struct ct_dpif_dump_state *, struct ct_dpif_entry *);
 int ct_dpif_dump_done(struct ct_dpif_dump_state *);
-int ct_dpif_flush(struct dpif *, const uint16_t *zone,
+int ct_dpif_flush(struct dpif *, const uint32_t *zone,
                   const struct ct_dpif_tuple *);
 int ct_dpif_set_maxconns(struct dpif *dpif, uint32_t maxconns);
 int ct_dpif_get_maxconns(struct dpif *dpif, uint32_t *maxconns);
@@ -266,10 +266,10 @@ void ct_dpif_format_tuple(struct ds *, const struct ct_dpif_tuple *);
 uint8_t ct_dpif_coalesce_tcp_state(uint8_t state);
 void ct_dpif_format_tcp_stat(struct ds *, int, int);
 bool ct_dpif_parse_tuple(struct ct_dpif_tuple *, const char *s, struct ds *);
-void ct_dpif_push_zone_limit(struct ovs_list *, uint16_t zone, uint32_t limit,
+void ct_dpif_push_zone_limit(struct ovs_list *, uint32_t zone, uint32_t limit,
                              uint32_t count);
 void ct_dpif_free_zone_limits(struct ovs_list *);
-bool ct_dpif_parse_zone_limit_tuple(const char *s, uint16_t *pzone,
+bool ct_dpif_parse_zone_limit_tuple(const char *s, uint32_t *pzone,
                                     uint32_t *plimit, struct ds *);
 void ct_dpif_format_zone_limits(uint32_t default_limit,
                                 const struct ovs_list *, struct ds *);

@@ -106,7 +106,7 @@ struct ipf_list_key {
     uint32_t recirc_id;
     ovs_be32 ip_id;   /* V6 is 32 bits. */
     ovs_be16 dl_type;
-    uint16_t zone;
+    uint32_t zone;
     uint8_t nw_proto;
 };
 
@@ -625,7 +625,7 @@ invalid_pkt:
 }
 
 static bool
-ipf_v4_key_extract(struct dp_packet *pkt, ovs_be16 dl_type, uint16_t zone,
+ipf_v4_key_extract(struct dp_packet *pkt, ovs_be16 dl_type, uint32_t zone,
                    struct ipf_list_key *key, uint16_t *start_data_byte,
                    uint16_t *end_data_byte, bool *ff, bool *lf)
 {
@@ -707,7 +707,7 @@ invalid_pkt:
 }
 
 static void
-ipf_v6_key_extract(struct dp_packet *pkt, ovs_be16 dl_type, uint16_t zone,
+ipf_v6_key_extract(struct dp_packet *pkt, ovs_be16 dl_type, uint32_t zone,
                    struct ipf_list_key *key, uint16_t *start_data_byte,
                    uint16_t *end_data_byte, bool *ff, bool *lf)
 {
@@ -848,7 +848,7 @@ ipf_list_init(struct ipf_list *ipf_list, struct ipf_list_key *key,
  * to a list of fragemnts. */
 static bool
 ipf_handle_frag(struct ipf *ipf, struct dp_packet *pkt, ovs_be16 dl_type,
-                uint16_t zone, long long now, uint32_t hash_basis,
+                uint32_t zone, long long now, uint32_t hash_basis,
                 bool dnsteal)
     OVS_REQUIRES(ipf->ipf_lock)
 {
@@ -923,7 +923,7 @@ ipf_handle_frag(struct ipf *ipf, struct dp_packet *pkt, ovs_be16 dl_type,
 /* Filters out fragments from a batch of fragments and adjust the batch. */
 static void
 ipf_extract_frags_from_batch(struct ipf *ipf, struct dp_packet_batch *pb,
-                             ovs_be16 dl_type, uint16_t zone, long long now,
+                             ovs_be16 dl_type, uint32_t zone, long long now,
                              uint32_t hash_basis)
 {
     const size_t pb_cnt = dp_packet_batch_size(pb);
@@ -1211,7 +1211,7 @@ ipf_post_execute_reass_pkts(struct ipf *ipf,
  * be added to the batch to be sent through conntrack. */
 void
 ipf_preprocess_conntrack(struct ipf *ipf, struct dp_packet_batch *pb,
-                         long long now, ovs_be16 dl_type, uint16_t zone,
+                         long long now, ovs_be16 dl_type, uint32_t zone,
                          uint32_t hash_basis)
 {
     if (ipf_get_enabled(ipf)) {
