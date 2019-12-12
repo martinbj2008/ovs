@@ -97,6 +97,7 @@ static void set_mark(struct dp_packet *, struct conn *,
 static void set_label(struct dp_packet *, struct conn *,
                       const struct ovs_key_ct_labels *val,
                       const struct ovs_key_ct_labels *mask);
+static void set_zone_to_dst_mac(struct dp_packet *, struct conn *);
 static void *clean_thread_main(void *f_);
 
 static bool
@@ -207,6 +208,9 @@ long long ct_timeout_val[] = {
 /* If the total number of connections goes above this value, no new connections
  * are accepted; this is for CT_CONN_TYPE_DEFAULT connections. */
 #define DEFAULT_N_CONN_LIMIT 3000000
+
+/*Set zone in conn key to dst mac if zone in rev conn key is 0x1000000*/
+#define SET_DST_MAC_ZONE 0x1000000
 
 /* Does a member by member comparison of two conn_keys; this
  * function must be kept in sync with struct conn_key; returns 0
@@ -1215,6 +1219,10 @@ process_one(struct conntrack *ct, struct dp_packet *pkt,
         set_label(pkt, conn, &setlabel[0], &setlabel[1]);
     }
 
+    if (conn && zone == SET_DST_MAC_ZONE) {
+        set_zone_to_dst_mac(pkt, conn);
+    }
+
     handle_alg_ctl(ct, ctx, pkt, ct_alg_ctl, conn, now, !!nat_action_info);
 }
 
@@ -1300,6 +1308,20 @@ set_label(struct dp_packet *pkt, struct conn *conn,
         conn->label = pkt->md.ct_label;
     }
     ovs_mutex_unlock(&conn->lock);
+}
+
+static void
+set_zone_to_dst_mac(struct dp_packet *pkt, struct conn *conn)
+{
+    struct eth_header *eh = dp_packet_eth(pkt);
+    if (eh) {
+        struct eth_addr dst = ETH_ADDR_C(00, 00, 00, 00, 00, 00);
+        dst.ea[2] = conn->key.zone >> 24;
+        dst.ea[3] = conn->key.zone >> 16 & 0xff;
+        dst.ea[4] = conn->key.zone >> 8 & 0xff;
+        dst.ea[5] = conn->key.zone & 0xff;
+        eh->eth_dst = dst;
+    }
 }
 
 
