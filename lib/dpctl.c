@@ -2251,8 +2251,8 @@ dpctl_ct_dump_rs_pool(int argc, const char *argv[],
     struct dpif *dpif;
     struct ds ds = DS_EMPTY_INITIALIZER;
     int error = opt_dpif_open(argc, argv, dpctl_p, 2, &dpif);
+    struct ovs_list ct_rs_pools = OVS_LIST_INITIALIZER(&ct_rs_pools);
     if (!error) {
-        struct ovs_list ct_rs_pools = OVS_LIST_INITIALIZER(&ct_rs_pools);
         error = ct_dpif_dump_rs_pool(dpif, &ct_rs_pools);
         if (!error) {
             error = ct_dpif_format_rs_pool_pack(&ct_rs_pools, &ds);
@@ -2272,7 +2272,7 @@ dpctl_ct_dump_rs_pool(int argc, const char *argv[],
 error:
     dpctl_error(dpctl_p, error, "%s", ds_cstr(&ds));
 out:
-    /*TODO: free ovs list*/
+    ct_dpif_free_rs_pool(&ct_rs_pools);
     ds_destroy(&ds);
     dpif_close(dpif);
     return error;

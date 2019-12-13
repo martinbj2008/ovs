@@ -856,3 +856,14 @@ ct_dpif_format_rs_pool_pack(const struct ovs_list *rs_pools, struct ds *ds)
     ds_chomp(ds, ',');
     return 0;
 }
+
+void
+ct_dpif_free_rs_pool(struct ovs_list *rs_pools)
+{
+    while (!ovs_list_is_empty(rs_pools)) {
+        struct ovs_list *entry = ovs_list_pop_front(rs_pools);
+        struct ct_rs_pool_t *ct_rs_pool;
+        ct_rs_pool = CONTAINER_OF(entry, struct ct_rs_pool_t, node);
+        free(ct_rs_pool);
+    }
+}

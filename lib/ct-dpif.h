@@ -279,5 +279,6 @@ int ct_dpif_del_rs_pool(struct dpif *dpif, char *pool_name);
 int ct_dpif_dump_rs_pool(struct dpif *dpif, struct ovs_list  *ct_rs_pools);
 int ct_dpif_parse_rs_pool(struct ct_rs_pool_t *, const char *s);
 int ct_dpif_format_rs_pool_pack(const struct ovs_list *ct_rs_pools, struct ds *);
+void ct_dpif_free_rs_pool(struct ovs_list *);
 
 #endif /* CT_DPIF_H */
