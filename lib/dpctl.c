@@ -2189,11 +2189,11 @@ dpctl_ct_add_rs_pool(int argc, const char *argv[],
     struct ds ds = DS_EMPTY_INITIALIZER;
     int error = opt_dpif_open(argc, argv, dpctl_p, 3, &dpif);
     if (!error) {
-        struct ct_rs_pool_t *rs_pool = xmalloc(sizeof(struct ct_rs_pool_t));
-        memset(rs_pool, 0, sizeof *rs_pool);
-        error = ct_dpif_parse_rs_pool(rs_pool, argv[argc-1]);
+        struct ct_rs_pool_t rs_pool;
+        memset(&rs_pool, 0, sizeof rs_pool);
+        error = ct_dpif_parse_rs_pool(&rs_pool, argv[argc-1]);
         if (!error) {
-            error = ct_dpif_add_rs_pool(dpif, rs_pool);
+            error = ct_dpif_add_rs_pool(dpif, &rs_pool);
 
             if (!error) {
                 goto out;

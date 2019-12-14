@@ -2475,8 +2475,28 @@ conntrack_get_nconns(struct conntrack *ct, uint32_t *nconns)
 int
 conntrack_add_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *rs_pool)
 {
-    ovs_list_push_front(&ct->rs_pools, &rs_pool->node);
-    ct->pool_count++;
+    struct ct_rs_pool_t *old_rs_pool = get_ct_rs_pool(ct, rs_pool->pool_name);
+    if (old_rs_pool) {
+        for(int i = 0; i < rs_pool->count; i++) {
+            bool is_rs_existed = false;
+            for(int j = 0; j < old_rs_pool->count; j++) {
+                if(!memcmp(&rs_pool->rs[i], &old_rs_pool->rs[j], sizeof(struct ct_rs_t))) {
+                    is_rs_existed = true;
+                    break;
+                }
+            }
+            if (is_rs_existed) {
+                continue;
+            } else {
+                old_rs_pool->rs[old_rs_pool->count++] = rs_pool->rs[i];
+            }
+        }
+    } else {
+        struct ct_rs_pool_t *new_rs_pool = xmalloc(sizeof(struct ct_rs_pool_t));
+        memcpy(new_rs_pool, rs_pool, sizeof *rs_pool);
+        ovs_list_push_front(&ct->rs_pools, &new_rs_pool->node);
+        ct->pool_count++;
+    }
     return 0;
 }
 

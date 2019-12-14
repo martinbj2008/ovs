@@ -231,7 +231,7 @@ struct ct_rs_t {
 };
 
 struct ct_rs_pool_t {
-    uint16_t count;
+    uint16_t count;     /*rs number of this pool*/
     char pool_name[33];
     struct ct_rs_t rs[10];
     struct ovs_list node;
