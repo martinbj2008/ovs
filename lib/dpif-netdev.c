@@ -7694,10 +7694,10 @@ dpif_netdev_ct_add_rs_pool(struct dpif *dpif, struct ct_rs_pool_t *rs_pool)
 }
 
 static int
-dpif_netdev_ct_del_rs_pool(struct dpif *dpif, char *pool_name)
+dpif_netdev_ct_del_rs_pool(struct dpif *dpif, struct ct_rs_pool_t *rs_pool)
 {
     struct dp_netdev *dp = get_dp_netdev(dpif);
-    return conntrack_del_rs_pool(dp->conntrack, pool_name);
+    return conntrack_del_rs_pool(dp->conntrack, rs_pool);
 }
 
 static int

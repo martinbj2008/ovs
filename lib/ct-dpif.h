@@ -275,7 +275,7 @@ void ct_dpif_format_zone_limits(uint32_t default_limit,
                                 const struct ovs_list *, struct ds *);
 
 int ct_dpif_add_rs_pool(struct dpif *dpif, struct ct_rs_pool_t *);
-int ct_dpif_del_rs_pool(struct dpif *dpif, char *pool_name);
+int ct_dpif_del_rs_pool(struct dpif *dpif, struct ct_rs_pool_t *);
 int ct_dpif_dump_rs_pool(struct dpif *dpif, struct ovs_list  *ct_rs_pools);
 int ct_dpif_parse_rs_pool(struct ct_rs_pool_t *, const char *s);
 int ct_dpif_format_rs_pool_pack(const struct ovs_list *ct_rs_pools, struct ds *);

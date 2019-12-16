@@ -774,10 +774,10 @@ ct_dpif_add_rs_pool(struct dpif *dpif, struct ct_rs_pool_t *rs_pool)
 }
 
 int
-ct_dpif_del_rs_pool(struct dpif *dpif, char *pool_name)
+ct_dpif_del_rs_pool(struct dpif *dpif, struct ct_rs_pool_t *rs_pool)
 {
     return (dpif->dpif_class->ct_del_rs_pool
-            ? dpif->dpif_class->ct_del_rs_pool(dpif, pool_name)
+            ? dpif->dpif_class->ct_del_rs_pool(dpif, rs_pool)
             : EOPNOTSUPP);
 }
 
@@ -828,8 +828,8 @@ ct_dpif_parse_rs_pool(struct ct_rs_pool_t *rs_pool, const char *s_) {
                 }
                 rs_pool->count = count;
                 s++;
-                return 0;
             }
+            return 0;
         } else {
             return EINVAL;
         }

@@ -500,7 +500,7 @@ struct dpif_class {
     int (*ct_del_limits)(struct dpif *, const struct ovs_list *zone_limits);
 
     int (*ct_add_rs_pool)(struct dpif *, struct ct_rs_pool_t *);
-    int (*ct_del_rs_pool)(struct dpif *, char *pool_name);
+    int (*ct_del_rs_pool)(struct dpif *, struct ct_rs_pool_t *);
     int (*ct_dump_rs_pool)(struct dpif *, struct ovs_list *);
 
     /* IP Fragmentation. */

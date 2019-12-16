@@ -136,7 +136,7 @@ int conntrack_get_maxconns(struct conntrack *ct, uint32_t *maxconns);
 int conntrack_get_nconns(struct conntrack *ct, uint32_t *nconns);
 
 int conntrack_add_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *);
-int conntrack_del_rs_pool(struct conntrack *ct, char *pool_name);
+int conntrack_del_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *);
 int conntrack_dump_rs_pool(struct conntrack *ct, struct ovs_list *);
 
 struct ipf *conntrack_ipf_ctx(struct conntrack *ct);
