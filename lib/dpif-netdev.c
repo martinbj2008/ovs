@@ -2428,6 +2428,7 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
         }
     }
     info.flow_mark = mark;
+    info.dpif_class = pmd->dp->class;
 
     ovs_mutex_lock(&pmd->dp->port_mutex);
     port = dp_netdev_lookup_port(pmd->dp, in_port);

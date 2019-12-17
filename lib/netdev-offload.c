@@ -559,6 +559,7 @@ netdev_ports_get(odp_port_t port_no, const struct dpif_class *dpif_class)
     struct port_to_netdev_data *data;
     struct netdev *ret = NULL;
 
+
     ovs_mutex_lock(&netdev_hmap_mutex);
     data = netdev_ports_lookup(port_no, dpif_class);
     if (data) {

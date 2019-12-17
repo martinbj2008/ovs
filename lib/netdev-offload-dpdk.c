@@ -349,8 +349,30 @@ add_flow_pattern(struct flow_patterns *patterns, enum rte_flow_item_type type,
     patterns->items[cnt].spec = spec;
     patterns->items[cnt].mask = mask;
     patterns->items[cnt].last = NULL;
-    dump_flow_pattern(&patterns->items[cnt]);
     patterns->cnt++;
+}
+
+static void
+dump_flow_action(struct rte_flow_action *action)
+{
+    struct ds s;
+
+    if (!VLOG_IS_DBG_ENABLED() || action->type == RTE_FLOW_ACTION_TYPE_END) {
+        return;
+    }
+
+    ds_init(&s);
+
+    VLOG_DBG("\naction->type: %d\n", action->type);
+
+    if (action->type == RTE_FLOW_ACTION_TYPE_PORT_ID) {
+        const struct rte_flow_action_port_id *output = action->conf;
+        ds_put_format(&s, "\nRTE_FLOW_ACTION_TYPE_PORT_ID original: %d, id: %d\n",
+                output->original, output->id);
+    }
+    
+    VLOG_DBG("%s", ds_cstr(&s));
+    ds_destroy(&s);
 }
 
 static void
@@ -379,42 +401,28 @@ struct action_rss_data {
     uint16_t queue[0];
 };
 
-static struct action_rss_data *
-add_flow_rss_action(struct flow_actions *actions,
-                    struct netdev *netdev)
+static void
+netdev_offload_dpdk_dump(struct flow_patterns *patterns,
+                         struct flow_actions *actions)
 {
     int i;
-    struct action_rss_data *rss_data;
-
-    rss_data = xmalloc(sizeof *rss_data +
-                       netdev_n_rxq(netdev) * sizeof rss_data->queue[0]);
-    *rss_data = (struct action_rss_data) {
-        .conf = (struct rte_flow_action_rss) {
-            .func = RTE_ETH_HASH_FUNCTION_DEFAULT,
-            .level = 0,
-            .types = 0,
-            .queue_num = netdev_n_rxq(netdev),
-            .queue = rss_data->queue,
-            .key_len = 0,
-            .key  = NULL
-        },
-    };
-
-    /* Override queue array with default. */
-    for (i = 0; i < netdev_n_rxq(netdev); i++) {
-       rss_data->queue[i] = i;
+    VLOG_INFO("XXX: dump rte pattern and aciton\n");
+    for (i = 0; i < patterns->cnt; i++) {
+        dump_flow_pattern(&patterns->items[i]);
     }
 
-    add_flow_action(actions, RTE_FLOW_ACTION_TYPE_RSS, &rss_data->conf);
-
-    return rss_data;
+    for (i = 0; i < actions->cnt; i++) {
+        dump_flow_action(&actions->actions[i]);
+    }
+    
+    VLOG_INFO("XXX: dump rte pattern and aciton end!\n");
 }
-
+    
 static int
 netdev_offload_dpdk_add_flow(struct netdev *netdev,
                              const struct match *match,
-                             struct nlattr *nl_actions OVS_UNUSED,
-                             size_t actions_len OVS_UNUSED,
+                             struct nlattr *nl_actions,
+                             size_t actions_len,
                              const ovs_u128 *ufid,
                              struct offload_info *info)
 {
@@ -422,7 +430,8 @@ netdev_offload_dpdk_add_flow(struct netdev *netdev,
         .group = 0,
         .priority = 0,
         .ingress = 1,
-        .egress = 0
+        .egress = 0,
+        .transfer = 1,
     };
     struct flow_patterns patterns = { .items = NULL, .cnt = 0 };
     struct flow_actions actions = { .actions = NULL, .cnt = 0 };
@@ -583,28 +592,90 @@ netdev_offload_dpdk_add_flow(struct netdev *netdev,
 
     add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_END, NULL, NULL);
 
-    struct rte_flow_action_mark mark;
-    struct action_rss_data *rss;
+    const struct nlattr *a;
+    unsigned int left;
 
-    mark.id = info->flow_mark;
-    add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_MARK, &mark);
+    if (!actions_len || !nl_actions) {
+        VLOG_INFO("%s: skip flow offload without actions\n", netdev_get_name(netdev));
+        ret = -1;
+        goto out;
+    }
 
-    rss = add_flow_rss_action(&actions, netdev);
+    int out_put_action_cnt = 0;
+    struct rte_flow_action_port_id port_id;
+
+    NL_ATTR_FOR_EACH_UNSAFE (a, left, nl_actions, actions_len) {
+        int type = nl_attr_type(a);
+        switch ((enum ovs_action_attr) type) {
+        case OVS_ACTION_ATTR_OUTPUT: {
+            if (out_put_action_cnt) {
+                VLOG_INFO("MLX5 NIC can only one fate actions in a flow, offload fail\n");
+                ret = -1;
+                goto out;
+            }
+
+            odp_port_t odp_port = nl_attr_get_odp_port(a);
+
+            struct netdev *dst_netdev = netdev_ports_get(odp_port, info->dpif_class);
+            if (!dst_netdev) {
+                VLOG_INFO("when offload output, can't find output port\n");
+                continue;
+            }
+
+            port_id.id = netdev_dpdk_get_portid(dst_netdev);
+            port_id.original = 0;
+            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_PORT_ID, &port_id);
+            
+            out_put_action_cnt ++;
+            break;
+        }
+        case OVS_ACTION_ATTR_CHECK_PKT_LEN:
+        case OVS_ACTION_ATTR_PUSH_VLAN:
+        case OVS_ACTION_ATTR_POP_VLAN:
+        case OVS_ACTION_ATTR_UNSPEC:
+        case OVS_ACTION_ATTR_USERSPACE:
+        case OVS_ACTION_ATTR_SET:
+        case OVS_ACTION_ATTR_SAMPLE:
+        case OVS_ACTION_ATTR_RECIRC:
+        case OVS_ACTION_ATTR_HASH:
+        case OVS_ACTION_ATTR_PUSH_MPLS:
+        case OVS_ACTION_ATTR_POP_MPLS:
+        case OVS_ACTION_ATTR_SET_MASKED:
+        case OVS_ACTION_ATTR_CT:
+        case OVS_ACTION_ATTR_TRUNC:
+        case OVS_ACTION_ATTR_PUSH_ETH:
+        case OVS_ACTION_ATTR_POP_ETH:
+        case OVS_ACTION_ATTR_CT_CLEAR:
+        case OVS_ACTION_ATTR_PUSH_NSH:
+        case OVS_ACTION_ATTR_POP_NSH:
+        case OVS_ACTION_ATTR_METER:
+        case OVS_ACTION_ATTR_TUNNEL_PUSH:
+        case OVS_ACTION_ATTR_TUNNEL_POP:
+        case OVS_ACTION_ATTR_CLONE:
+        case __OVS_ACTION_ATTR_MAX:
+        default:
+            VLOG_INFO("%s: only support output action\n", netdev_get_name(netdev));
+            ret = -1;
+            goto out;
+        }
+    }
+
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_END, NULL);
+
+    netdev_offload_dpdk_dump(&patterns, &actions);
 
     flow = netdev_dpdk_rte_flow_create(netdev, &flow_attr,
                                        patterns.items,
                                        actions.actions, &error);
 
-    free(rss);
     if (!flow) {
-        VLOG_ERR("%s: rte flow creat error: %u : message : %s\n",
+        VLOG_ERR("%s: rte flow create error: %u : message : %s\n",
                  netdev_get_name(netdev), error.type, error.message);
         ret = -1;
         goto out;
     }
     ufid_to_rte_flow_associate(ufid, flow);
-    VLOG_DBG("%s: installed flow %p by ufid "UUID_FMT"\n",
+    VLOG_INFO("%s: installed flow %p by ufid "UUID_FMT"\n",
              netdev_get_name(netdev), flow, UUID_ARGS((struct uuid *)ufid));
 
 out:

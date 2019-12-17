@@ -1118,6 +1118,12 @@ netdev_dpdk_cast(const struct netdev *netdev)
     return CONTAINER_OF(netdev, struct netdev_dpdk, up);
 }
 
+int
+netdev_dpdk_get_portid(const struct netdev *netdev)
+{
+    return netdev_dpdk_cast(netdev)->port_id;
+}
+
 static struct netdev *
 netdev_dpdk_alloc(void)
 {
@@ -4461,6 +4467,8 @@ netdev_dpdk_rte_flow_create(struct netdev *netdev,
     struct netdev_dpdk *dev = netdev_dpdk_cast(netdev);
 
     ovs_mutex_lock(&dev->mutex);
+    VLOG_INFO("Offload in %d port\n", dev->port_id);
+
     flow = rte_flow_create(dev->port_id, attr, items, actions, error);
     ovs_mutex_unlock(&dev->mutex);
     return flow;
