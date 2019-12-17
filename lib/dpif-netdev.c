@@ -264,23 +264,6 @@ static inline bool is_dpctl_commands_need_generate_ufid(const ovs_u128* ufid);
 #define DP_SUPPORTED_METER_BAND_TYPES           \
     ( 1 << OFPMBT13_DROP )
 
-struct dp_meter_band {
-    struct ofputil_meter_band up; /* type, prec_level, pad, rate, burst_size */
-    uint32_t bucket; /* In 1/1000 packets (for PKTPS), or in bits (for KBPS) */
-    uint64_t packet_count;
-    uint64_t byte_count;
-};
-
-struct dp_meter {
-    uint16_t flags;
-    uint16_t n_bands;
-    uint32_t max_delta_t;
-    uint64_t used;
-    uint64_t packet_count;
-    uint64_t byte_count;
-    struct dp_meter_band bands[];
-};
-
 struct pmd_auto_lb {
     bool auto_lb_requested;     /* Auto load balancing requested by user. */
     bool is_enabled;            /* Current status of Auto load balancing. */

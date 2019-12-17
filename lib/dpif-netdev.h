@@ -33,6 +33,23 @@ extern "C" {
  * headers to be aligned on a 4-byte boundary.  */
 enum { DP_NETDEV_HEADROOM = 2 + VLAN_HEADER_LEN };
 
+struct dp_meter_band {
+    struct ofputil_meter_band up; /* type, prec_level, pad, rate, burst_size */
+    uint32_t bucket; /* In 1/1000 packets (for PKTPS), or in bits (for KBPS) */
+    uint64_t packet_count;
+    uint64_t byte_count;
+};
+
+struct dp_meter {
+    uint16_t flags;
+    uint16_t n_bands;
+    uint32_t max_delta_t;
+    uint64_t used;
+    uint64_t packet_count;
+    uint64_t byte_count;
+    struct dp_meter_band bands[];
+};
+
 bool dpif_is_netdev(const struct dpif *);
 
 #define NR_QUEUE   1
