@@ -499,7 +499,7 @@ netdev_offload_dpdk_add_flow(struct netdev *netdev,
         spec.ipv4.hdr.dst_addr        = match->flow.nw_dst;
 
         mask.ipv4.hdr.type_of_service = match->wc.masks.nw_tos;
-        mask.ipv4.hdr.time_to_live    = match->wc.masks.nw_ttl;
+        mask.ipv4.hdr.time_to_live    = 0x00u;
         mask.ipv4.hdr.next_proto_id   = match->wc.masks.nw_proto;
         mask.ipv4.hdr.src_addr        = match->wc.masks.nw_src;
         mask.ipv4.hdr.dst_addr        = match->wc.masks.nw_dst;
