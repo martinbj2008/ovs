@@ -149,7 +149,7 @@ void ovs_qos_mask_destroy(struct ovs_qos_mask *mask)
 enum ovs_qos_action ovs_qos_counter(struct ovs_qos_key *match, uint32_t pkt_len)
 {
     struct ovs_qos_node *n;
-    enum rte_meter_color co = e_RTE_METER_GREEN;
+    enum rte_color co = RTE_COLOR_GREEN;
 
     OVS_QOS_MASK_FOREACH {
         struct ovs_qos_key match_masked;
@@ -174,7 +174,7 @@ enum ovs_qos_action ovs_qos_counter(struct ovs_qos_key *match, uint32_t pkt_len)
     }
 
 out:
-    if (OVS_LIKELY(co == e_RTE_METER_GREEN))
+    if (OVS_LIKELY(co == RTE_COLOR_GREEN))
         return OVS_QOS_ACT_ACCEPT;
 
     return OVS_QOS_ACT_DROP;

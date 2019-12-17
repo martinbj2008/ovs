@@ -84,12 +84,12 @@ static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 20);
  * The minimum mbuf size is limited to avoid scatter behaviour and drop in
  * performance for standard Ethernet MTU.
  */
-#define ETHER_HDR_MAX_LEN           (ETHER_HDR_LEN + ETHER_CRC_LEN \
+#define ETHER_HDR_MAX_LEN           (RTE_ETHER_HDR_LEN + RTE_ETHER_CRC_LEN \
                                      + (2 * VLAN_HEADER_LEN))
-#define MTU_TO_FRAME_LEN(mtu)       ((mtu) + ETHER_HDR_LEN + ETHER_CRC_LEN)
+#define MTU_TO_FRAME_LEN(mtu)       ((mtu) + RTE_ETHER_HDR_LEN + RTE_ETHER_CRC_LEN)
 #define MTU_TO_MAX_FRAME_LEN(mtu)   ((mtu) + ETHER_HDR_MAX_LEN)
 #define FRAME_LEN_TO_MTU(frame_len) ((frame_len)                    \
-                                     - ETHER_HDR_LEN - ETHER_CRC_LEN)
+                                     - RTE_ETHER_HDR_LEN - RTE_ETHER_CRC_LEN)
 #define NETDEV_DPDK_MBUF_ALIGN      1024
 #define NETDEV_DPDK_MAX_PKT_LEN     9728
 
@@ -616,7 +616,7 @@ dpdk_calculate_mbufs(struct netdev_dpdk *dev, int mtu, bool per_port_mp)
          * can change dynamically at runtime. For now, use this rough
          * heurisitic.
          */
-        if (mtu >= ETHER_MTU) {
+        if (mtu >= RTE_ETHER_MTU) {
             n_mbufs = MAX_NB_MBUF;
         } else {
             n_mbufs = MIN_NB_MBUF;
@@ -931,7 +931,7 @@ dpdk_eth_dev_port_config(struct netdev_dpdk *dev, int n_rxq, int n_txq)
      * scatter to support jumbo RX.
      * Setting scatter for the device is done after checking for
      * scatter support in the device capabilites. */
-    if (dev->mtu > ETHER_MTU) {
+    if (dev->mtu > RTE_ETHER_MTU) {
         if (dev->hw_ol_features & NETDEV_RX_HW_SCATTER) {
             conf.rxmode.offloads |= DEV_RX_OFFLOAD_SCATTER;
         }
@@ -1043,7 +1043,7 @@ dpdk_eth_dev_init(struct netdev_dpdk *dev)
 {
     struct rte_pktmbuf_pool_private *mbp_priv;
     struct rte_eth_dev_info info;
-    struct ether_addr eth_addr;
+    struct rte_ether_addr eth_addr;
     int diag;
     int n_rxq, n_txq;
     uint32_t rx_chksm_offload_capa = DEV_RX_OFFLOAD_UDP_CKSUM |
@@ -1168,7 +1168,7 @@ common_construct(struct netdev *netdev, dpdk_port_t port_no,
     dev->port_id = port_no;
     dev->type = type;
     dev->flags = 0;
-    dev->requested_mtu = ETHER_MTU;
+    dev->requested_mtu = RTE_ETHER_MTU;
     dev->max_packet_len = MTU_TO_FRAME_LEN(dev->mtu);
     dev->requested_lsc_interrupt_mode = 0;
     ovsrcu_index_init(&dev->vid, -1);
@@ -1695,7 +1695,7 @@ netdev_dpdk_get_port_by_mac(const char *mac_str)
     }
 
     RTE_ETH_FOREACH_DEV (port_id) {
-        struct ether_addr ea;
+        struct rte_ether_addr ea;
 
         rte_eth_macaddr_get(port_id, &ea);
         memcpy(port_mac.ea, ea.addr_bytes, ETH_ADDR_LEN);
@@ -2078,10 +2078,10 @@ netdev_dpdk_policer_pkt_handle(struct rte_meter_srtcm *meter,
                                struct rte_meter_srtcm_profile *profile,
                                struct rte_mbuf *pkt, uint64_t time)
 {
-    uint32_t pkt_len = rte_pktmbuf_pkt_len(pkt) - sizeof(struct ether_hdr);
+    uint32_t pkt_len = rte_pktmbuf_pkt_len(pkt) - sizeof(struct rte_ether_hdr);
 
     return rte_meter_srtcm_color_blind_check(meter, profile, time, pkt_len) ==
-                                             e_RTE_METER_GREEN;
+                                             RTE_COLOR_GREEN;
 }
 
 static int
@@ -2135,14 +2135,14 @@ ovs_qos_policer_run(struct rte_mbuf **pkts, int pkt_cnt,
     int i, used = 0, droped = 0;
 
     for (i = 0; i < pkt_cnt; i++) {
-        struct ether_hdr *eth_hdr;
+        struct rte_ether_hdr *eth_hdr;
         struct rte_mbuf *pkt = pkts[i];
         
-        eth_hdr = rte_pktmbuf_mtod(pkt, struct ether_hdr *);
+        eth_hdr = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr *);
         
-        if (eth_hdr->ether_type == rte_cpu_to_be_16(ETHER_TYPE_IPv4)) {
+        if (eth_hdr->ether_type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 
-            struct ipv4_hdr *ipv4_hdr = (struct ipv4_hdr *)(eth_hdr + 1);
+            struct rte_ipv4_hdr *ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
         
             struct ovs_qos_key match;
             match.dir = dir;
@@ -2150,9 +2150,9 @@ ovs_qos_policer_run(struct rte_mbuf **pkts, int pkt_cnt,
             match.reg = UINT_MAX; 
 
             if (ipv4_hdr->next_proto_id == IPPROTO_UDP) {
-                struct udp_hdr *udp_hdr;
-                udp_hdr = (struct udp_hdr *)((char *)ipv4_hdr +
-                                             ((ipv4_hdr->version_ihl & IPV4_HDR_IHL_MASK) << 2));
+                struct rte_udp_hdr *udp_hdr;
+                udp_hdr = (struct rte_udp_hdr *)((char *)ipv4_hdr +
+                                             ((ipv4_hdr->version_ihl & RTE_IPV4_HDR_IHL_MASK) << 2));
 
                 if (udp_hdr->dst_port == htons(4789)) {
                     struct vxlanhdr *vxh = (struct vxlanhdr *)(udp_hdr + 1);
@@ -2161,7 +2161,7 @@ ovs_qos_policer_run(struct rte_mbuf **pkts, int pkt_cnt,
             }
 
             /* Don't use ipv4 total_length, attack ! */
-            int pkt_len = rte_pktmbuf_pkt_len(pkt) - sizeof(struct ether_hdr);
+            int pkt_len = rte_pktmbuf_pkt_len(pkt) - sizeof(struct rte_ether_hdr);
 
             if (OVS_QOS_ACT_DROP == ovs_qos_counter(&match, pkt_len)) {
                 rte_pktmbuf_free(pkt);
@@ -2686,7 +2686,7 @@ netdev_dpdk_set_mtu(struct netdev *netdev, int mtu)
      * a method to retrieve the upper bound MTU for a given device.
      */
     if (MTU_TO_MAX_FRAME_LEN(mtu) > NETDEV_DPDK_MAX_PKT_LEN
-        || mtu < ETHER_MIN_MTU) {
+        || mtu < RTE_ETHER_MIN_MTU) {
         VLOG_WARN("%s: unsupported MTU %d\n", dev->up.name, mtu);
         return EINVAL;
     }
