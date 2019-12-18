@@ -88,6 +88,11 @@ struct netdev_flow_api {
     int (*init_flow_api)(struct netdev *);
 };
 
+struct netdev_offload_meter {
+    void (*netdev_offload_meter_cb)(void *);
+    void *data;
+};
+
 int netdev_register_flow_api_provider(const struct netdev_flow_api *);
 int netdev_unregister_flow_api_provider(const char *type);
 

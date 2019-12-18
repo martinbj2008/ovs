@@ -21,6 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "dpif.h"
+#include "netdev-offload-provider.h"
 #include "openvswitch/types.h"
 #include "dp-packet.h"
 #include "packets.h"
@@ -47,6 +48,7 @@ struct dp_meter {
     uint64_t used;
     uint64_t packet_count;
     uint64_t byte_count;
+    struct netdev_offload_meter *offload;
     struct dp_meter_band bands[];
 };
 
