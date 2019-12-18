@@ -851,9 +851,9 @@ ct_dpif_format_rs_pool_pack(const struct ovs_list *rs_pools, struct ds *ds)
         }
         ds_chomp(ds, ',');
         ds_put_cstr(ds, "))");
-        ds_put_char(ds, ',');
+        ds_put_char(ds, '\n');
     }
-    ds_chomp(ds, ',');
+    ds_chomp(ds, '\n');
     return 0;
 }
 
