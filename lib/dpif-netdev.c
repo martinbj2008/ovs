@@ -5900,6 +5900,96 @@ dpif_netdev_meter_del(struct dpif *dpif,
     return error;
 }
 
+static int
+dpif_netdev_meter_get_config(struct dpif *dpif,
+                             ofproto_meter_id meter_id,
+                             struct ofputil_meter_config *conf)
+{
+    struct dp_netdev *dp = get_dp_netdev(dpif);
+    uint32_t mid = meter_id.uint32;
+    struct dp_meter *meter;
+    int ret = 0, i;
+
+    if (mid >= MAX_METERS) {
+        return -1;
+    }
+    
+    meter_lock(dp, mid);
+    meter = dp->meters[mid];
+    if (!meter) {
+        ret = -1;
+        goto done;
+    }
+
+    conf->n_bands = meter->n_bands;
+    conf->bands = xzalloc(conf->n_bands * sizeof(struct dp_meter_band));
+    for (i = 0; i < meter->n_bands; ++i) {
+        conf->bands[i] = meter->bands[i].up;
+    }
+
+done:
+    meter_unlock(dp, mid);
+    return ret;
+}
+
+static int
+dpif_netdev_meter_set_offload(struct dpif *dpif,
+                              ofproto_meter_id meter_id,
+                              void *data)
+{
+    struct dp_netdev *dp = get_dp_netdev(dpif);
+    uint32_t mid = meter_id.uint32;
+    struct dp_meter *meter;
+    int ret = 0;
+
+    if (mid >= MAX_METERS) {
+        return -1;
+    }
+    
+    meter_lock(dp, mid);
+    meter = dp->meters[mid];
+    if (!meter) {
+        ret = -1;
+        goto done;
+    }
+    
+    meter->offload = (struct netdev_offload_meter *)data;
+done:
+    meter_unlock(dp, mid);
+    return ret;
+}
+
+static int
+dpif_netdev_meter_get_offload(struct dpif *dpif,
+                              ofproto_meter_id meter_id,
+                              void **data, uint16_t size)
+{
+    struct dp_netdev *dp = get_dp_netdev(dpif);
+    uint32_t mid = meter_id.uint32;
+    struct dp_meter *meter;
+    int ret = 0;
+
+    if (mid >= MAX_METERS) {
+        return -1;
+    }
+    
+    meter_lock(dp, mid);
+    meter = dp->meters[mid];
+    if (!meter) {
+        ret = -1;
+        goto done;
+    }
+    
+    *data = NULL;
+    if (meter->offload) {
+        *data = xmemdup(meter->offload, size);
+    }
+
+done:
+    meter_unlock(dp, mid);
+    return ret;
+}
+
 
 static void
 dpif_netdev_disable_upcall(struct dpif *dpif)
@@ -7579,9 +7669,9 @@ const struct dpif_class dpif_netdev_class = {
     dpif_netdev_meter_set,
     dpif_netdev_meter_get,
     dpif_netdev_meter_del,
-    NULL,
-    NULL,
-    NULL,
+    dpif_netdev_meter_get_config,
+    dpif_netdev_meter_set_offload,
+    dpif_netdev_meter_get_offload,
 };
 
 static void
