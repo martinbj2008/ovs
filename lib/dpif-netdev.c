@@ -7579,6 +7579,9 @@ const struct dpif_class dpif_netdev_class = {
     dpif_netdev_meter_set,
     dpif_netdev_meter_get,
     dpif_netdev_meter_del,
+    NULL,
+    NULL,
+    NULL,
 };
 
 static void

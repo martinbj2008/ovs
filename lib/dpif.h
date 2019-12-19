@@ -879,6 +879,12 @@ int dpif_meter_get(const struct dpif *, ofproto_meter_id meter_id,
                    struct ofputil_meter_stats *, uint16_t n_bands);
 int dpif_meter_del(struct dpif *, ofproto_meter_id meter_id,
                    struct ofputil_meter_stats *, uint16_t n_bands);
+int dpif_meter_get_config(struct dpif *dpif, ofproto_meter_id meter_id,
+                          struct ofputil_meter_config *config);
+int dpif_meter_set_offload(struct dpif *dpif, ofproto_meter_id meter_id,
+                           void *data);
+int dpif_meter_get_offload(struct dpif *dpif, ofproto_meter_id meter_id,
+                           void **data, uint16_t size);
 
 /* Miscellaneous. */
 

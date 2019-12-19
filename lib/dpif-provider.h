@@ -552,6 +552,11 @@ struct dpif_class {
      * zero. */
     int (*meter_del)(struct dpif *, ofproto_meter_id meter_id,
                      struct ofputil_meter_stats *, uint16_t n_bands);
+    int (*meter_get_config)(struct dpif *, ofproto_meter_id meter_id,
+                            struct ofputil_meter_config *);
+    int (*meter_set_offload)(struct dpif *, ofproto_meter_id meter_id, void *);
+    int (*meter_get_offload)(struct dpif *, ofproto_meter_id meter_id, void **,
+                             uint16_t size);
 };
 
 extern const struct dpif_class dpif_netlink_class;

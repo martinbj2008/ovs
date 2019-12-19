@@ -66,6 +66,9 @@ COVERAGE_DEFINE(dpif_execute_with_help);
 COVERAGE_DEFINE(dpif_meter_set);
 COVERAGE_DEFINE(dpif_meter_get);
 COVERAGE_DEFINE(dpif_meter_del);
+COVERAGE_DEFINE(dpif_meter_get_config);
+COVERAGE_DEFINE(dpif_meter_set_offload);
+COVERAGE_DEFINE(dpif_meter_get_offload);
 
 static const struct dpif_class *base_dpif_classes[] = {
 #if defined(__linux__) || defined(_WIN32)
@@ -1991,5 +1994,68 @@ dpif_meter_del(struct dpif *dpif, ofproto_meter_id meter_id,
             stats->n_bands = 0;
         }
     }
+    return error;
+}
+
+int
+dpif_meter_get_config(struct dpif *dpif, ofproto_meter_id meter_id,
+                      struct ofputil_meter_config *config)
+{
+    COVERAGE_INC(dpif_meter_get_config);
+
+    int error = (dpif->dpif_class->meter_get_config
+                 ? dpif->dpif_class->meter_get_config(dpif, meter_id,
+                                                      config)
+                 : EOPNOTSUPP);
+    if (!error) {
+        VLOG_DBG_RL(&dpmsg_rl, "%s: DPIF meter %"PRIu32" get config",
+                    dpif_name(dpif), meter_id.uint32);
+    } else {
+        VLOG_WARN_RL(&error_rl, "%s: failed to get DPIF meter config %"PRIu32": %s",
+                     dpif_name(dpif), meter_id.uint32, ovs_strerror(error));
+    }
+
+    return error;
+}
+
+int
+dpif_meter_set_offload(struct dpif *dpif, ofproto_meter_id meter_id,
+                       void *data)
+{
+    COVERAGE_INC(dpif_meter_set_offload);
+
+    int error = (dpif->dpif_class->meter_set_offload
+                 ? dpif->dpif_class->meter_set_offload(dpif, meter_id,
+                                                       data)
+                 : EOPNOTSUPP);
+    if (!error) {
+        VLOG_DBG_RL(&dpmsg_rl, "%s: DPIF meter %"PRIu32" offload set",
+                    dpif_name(dpif), meter_id.uint32);
+    } else {
+        VLOG_WARN_RL(&error_rl, "%s: failed to offload set DPIF meter %"PRIu32": %s",
+                     dpif_name(dpif), meter_id.uint32, ovs_strerror(error));
+    }
+
+    return error;
+}
+
+int
+dpif_meter_get_offload(struct dpif *dpif, ofproto_meter_id meter_id,
+                       void **data, uint16_t size)
+{
+    COVERAGE_INC(dpif_meter_get_offload);
+
+    int error = (dpif->dpif_class->meter_get_offload
+                 ? dpif->dpif_class->meter_get_offload(dpif, meter_id,
+                                                       data, size)
+                 : EOPNOTSUPP);
+    if (!error) {
+        VLOG_DBG_RL(&dpmsg_rl, "%s: DPIF meter %"PRIu32" offload get",
+                    dpif_name(dpif), meter_id.uint32);
+    } else {
+        VLOG_WARN_RL(&error_rl, "%s: failed to offload get DPIF meter %"PRIu32": %s",
+                     dpif_name(dpif), meter_id.uint32, ovs_strerror(error));
+    }
+
     return error;
 }
