@@ -62,6 +62,7 @@ int ofputil_decode_meter_config(struct ofpbuf *,
                                 struct ofpbuf *bands);
 void ofputil_format_meter_config(struct ds *,
                                  const struct ofputil_meter_config *);
+uint32_t ofputil_meter_config_max_rate(struct ofputil_meter_config *conf);
 
 struct ofputil_meter_mod {
     uint16_t command;

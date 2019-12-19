@@ -807,3 +807,16 @@ ofputil_format_meter_mod(struct ds *s, const struct ofputil_meter_mod *mm)
 
     ofputil_format_meter_config(s, &mm->meter);
 }
+
+uint32_t
+ofputil_meter_config_max_rate(struct ofputil_meter_config *conf)
+{
+    uint32_t i, max_rate = 0;
+    for (i = 0; i < conf->n_bands; i++) {
+        if (max_rate < conf->bands[i].rate) {
+            max_rate = conf->bands[i].rate;
+        }
+    }
+
+    return max_rate;
+}
