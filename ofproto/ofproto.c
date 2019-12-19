@@ -6709,6 +6709,7 @@ handle_add_meter(struct ofproto *ofproto, struct ofputil_meter_mod *mm)
         return OFPERR_OFPMMFC_METER_EXISTS;
     }
 
+    provider_meter_id.uint32 = mm->meter.meter_id;
     error = ofproto->ofproto_class->meter_set(ofproto, &provider_meter_id,
                                               &mm->meter);
     if (!error) {
