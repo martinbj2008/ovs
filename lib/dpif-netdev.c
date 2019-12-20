@@ -2419,7 +2419,7 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
         ovs_mutex_unlock(&pmd->dp->port_mutex);
         goto err_free;
     }
-    ret = netdev_flow_put(port->netdev, &offload->match,
+    ret = netdev_flow_put(NULL, port->netdev, &offload->match,
                           CONST_CAST(struct nlattr *, offload->actions),
                           offload->actions_len, &flow->mega_ufid, &info,
                           NULL);

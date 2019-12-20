@@ -63,9 +63,10 @@ struct netdev_flow_api {
      * 'stats' is populated according to the rules set out in the description
      * above 'struct dpif_flow_put'.
      * Return 0 if successful, otherwise returns a positive errno value. */
-    int (*flow_put)(struct netdev *, struct match *, struct nlattr *actions,
-                    size_t actions_len, const ovs_u128 *ufid,
-                    struct offload_info *info, struct dpif_flow_stats *);
+    int (*flow_put)(struct dpif *, struct netdev *, struct match *,
+                    struct nlattr *actions, size_t actions_len,
+                    const ovs_u128 *ufid, struct offload_info *info,
+                    struct dpif_flow_stats *);
 
     /* Queries a flow specified by ufid on netdev.
      * Fills output buffer as 'wbuffer' in flow_dump_next, which

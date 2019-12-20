@@ -778,9 +778,10 @@ netdev_offload_dpdk_destroy_flow(struct netdev *netdev,
 }
 
 static int
-netdev_offload_dpdk_flow_put(struct netdev *netdev, struct match *match,
-                             struct nlattr *actions, size_t actions_len,
-                             const ovs_u128 *ufid, struct offload_info *info,
+netdev_offload_dpdk_flow_put(struct dpif *dpif OVS_UNUSED, struct netdev *netdev,
+                             struct match *match, struct nlattr *actions,
+                             size_t actions_len, const ovs_u128 *ufid,
+                             struct offload_info *info,
                              struct dpif_flow_stats *stats OVS_UNUSED)
 {
     struct rte_flow *rte_flow;

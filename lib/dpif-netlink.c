@@ -2038,7 +2038,7 @@ parse_flow_put(struct dpif_netlink *dpif, struct dpif_flow_put *put)
     info.dpif_class = dpif_class;
     info.tp_dst_port = dst_port;
     info.tunnel_csum_on = csum_on;
-    err = netdev_flow_put(dev, &match,
+    err = netdev_flow_put(NULL, dev, &match,
                           CONST_CAST(struct nlattr *, put->actions),
                           put->actions_len,
                           CONST_CAST(ovs_u128 *, put->ufid),

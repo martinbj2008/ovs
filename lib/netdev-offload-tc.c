@@ -1083,9 +1083,10 @@ flower_match_to_tun_opt(struct tc_flower *flower, const struct flow_tnl *tnl,
 }
 
 static int
-netdev_tc_flow_put(struct netdev *netdev, struct match *match,
-                   struct nlattr *actions, size_t actions_len,
-                   const ovs_u128 *ufid, struct offload_info *info,
+netdev_tc_flow_put(struct dpif *dpif OVS_UNUSED, struct netdev *netdev,
+                   struct match *match, struct nlattr *actions,
+                   size_t actions_len, const ovs_u128 *ufid,
+                   struct offload_info *info,
                    struct dpif_flow_stats *stats OVS_UNUSED)
 {
     static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 20);

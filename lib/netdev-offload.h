@@ -20,6 +20,7 @@
 
 #include "openvswitch/netdev.h"
 #include "openvswitch/types.h"
+#include "dpif-provider.h"
 #include "packets.h"
 #include "flow.h"
 
@@ -80,7 +81,8 @@ bool netdev_flow_dump_next(struct netdev_flow_dump *, struct match *,
                           struct nlattr **actions, struct dpif_flow_stats *,
                           struct dpif_flow_attrs *, ovs_u128 *ufid,
                           struct ofpbuf *rbuffer, struct ofpbuf *wbuffer);
-int netdev_flow_put(struct netdev *, struct match *, struct nlattr *actions,
+int netdev_flow_put(struct dpif *, struct netdev *,
+                    struct match *, struct nlattr *actions,
                     size_t actions_len, const ovs_u128 *,
                     struct offload_info *, struct dpif_flow_stats *);
 int netdev_flow_get(struct netdev *, struct match *, struct nlattr **actions,

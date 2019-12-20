@@ -1430,10 +1430,10 @@ find_offloaded_flow(const struct hmap *offloaded_flows, const ovs_u128 *ufid)
 }
 
 static int
-netdev_dummy_flow_put(struct netdev *netdev, struct match *match,
-                      struct nlattr *actions OVS_UNUSED,
-                      size_t actions_len OVS_UNUSED,
-                      const ovs_u128 *ufid, struct offload_info *info,
+netdev_dummy_flow_put(struct dpif *dpif OVS_UNUSED, struct netdev *netdev,
+                      struct match *match, struct nlattr *actions OVS_UNUSED,
+                      size_t actions_len OVS_UNUSED, const ovs_u128 *ufid,
+                      struct offload_info *info,
                       struct dpif_flow_stats *stats OVS_UNUSED)
 {
     struct netdev_dummy *dev = netdev_dummy_cast(netdev);
