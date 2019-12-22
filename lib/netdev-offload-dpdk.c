@@ -17,10 +17,12 @@
 #include <config.h>
 
 #include <rte_flow.h>
+#include <rte_mtr.h>
 
 #include "cmap.h"
 #include "dpif-netdev.h"
 #include "netdev-offload-provider.h"
+#include "openvswitch/ofp-meter.h"
 #include "netdev-provider.h"
 #include "openvswitch/match.h"
 #include "openvswitch/vlog.h"
@@ -417,9 +419,142 @@ netdev_offload_dpdk_dump(struct flow_patterns *patterns,
     
     VLOG_INFO("XXX: dump rte pattern and aciton end!\n");
 }
+
+struct dpdk_meter_offload {
+    uint32_t port_id;
+    struct rte_flow_action_meter mc;
+};
+
+static void netdev_offload_dpdk_meter_destroy(void *data)
+{
+    struct dpdk_meter_offload *dmo = data;
+    struct rte_mtr_error error;
+    
+    if (dmo) {
+        rte_mtr_meter_profile_delete(dmo->port_id,
+                                     dmo->mc.mtr_id,
+                                     &error);
+
+        rte_mtr_destroy(dmo->port_id,
+                        dmo->mc.mtr_id,
+                        &error);
+
+        free(dmo);
+    }
+}
+
+static struct rte_flow_action_meter*
+netdev_offload_dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
+{
+    uint32_t port_id = netdev_dpdk_get_portid(netdev);
+    struct netdev_offload_meter *nom;
+    struct dpdk_meter_offload *dmo;
+    struct ofputil_meter_config config;
+    ofproto_meter_id meter_id;
+    struct rte_mtr_meter_profile mp;
+    struct rte_mtr_params params;
+    struct rte_mtr_error mtr_error;
+    uint32_t max_rate;
+    int ret;
+
+    meter_id.uint32 = mid;
+    
+    if (dpif_meter_get_config(dpif, meter_id, &config)) {
+        return NULL;
+    }
+
+    nom = xmalloc(sizeof *nom);
+    dmo = xmalloc(sizeof *dmo);
+
+    nom->netdev_offload_meter_cb = netdev_offload_dpdk_meter_destroy;
+    nom->data = dmo;
+
+    dmo->mc.mtr_id = mid;
+    dmo->port_id = port_id;
+
+    memset(&mp, 0, sizeof(struct rte_mtr_meter_profile));
+    max_rate = ofputil_meter_config_max_rate(&config);
+
+    mp.alg = RTE_MTR_SRTCM_RFC2697;
+    mp.srtcm_rfc2697.cir = max_rate *1024 /8; /* rate_max Kbps*/
+    mp.srtcm_rfc2697.cbs = max_rate *1024 /8;
+    mp.srtcm_rfc2697.ebs = 0;
+
+    ret = rte_mtr_meter_profile_add(dmo->port_id, dmo->mc.mtr_id,
+                                    &mp, &mtr_error);
+    if (ret && ret != -EEXIST) {
+        VLOG_ERR("rte_mtr_meter_profile_add fail: err_type: %d err_msg: %s, portid: %d\n",
+                   mtr_error.type, mtr_error.message, netdev_dpdk_get_portid(netdev));
+        goto profile_err;
+    }
+
+    enum rte_color dscp_table[2];
+    dscp_table[0] = RTE_COLOR_YELLOW;
+    dscp_table[1] = RTE_COLOR_RED;
+
+    params.meter_profile_id = dmo->mc.mtr_id;
+    params.dscp_table = dscp_table;
+    params.meter_enable = 1;
+    params.use_prev_mtr_color = 0;
+    params.action[RTE_COLOR_GREEN]  = MTR_POLICER_ACTION_COLOR_GREEN;
+    params.action[RTE_COLOR_YELLOW] = MTR_POLICER_ACTION_DROP;
+    params.action[RTE_COLOR_RED]    = MTR_POLICER_ACTION_DROP;
+
+    ret = rte_mtr_create(dmo->port_id, dmo->mc.mtr_id, &params, 0, &mtr_error);
+    if (ret && ret != -EEXIST) {
+        VLOG_ERR("rte_mtr_create fail: err_type: %d err_msg: %s, portid: %d\n",
+                   mtr_error.type, mtr_error.message, netdev_dpdk_get_portid(netdev));
+        goto mtr_err;
+    }
+
+    dpif_meter_set_offload(dpif, meter_id, nom);
+    
+    free(config.bands);
+    return &dmo->mc;
+
+mtr_err:
+    rte_mtr_meter_profile_delete(dmo->port_id, dmo->mc.mtr_id, &mtr_error);
+
+profile_err:
+    free(nom);
+    free(dmo);
+    free(config.bands);
+    return NULL;
+}
+
+static struct rte_flow_action_meter *
+netdev_offload_dpdk_meter_update(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
+{
+    uint32_t port_id = netdev_dpdk_get_portid(netdev);
+    struct netdev_offload_meter *nom = NULL;
+    struct dpdk_meter_offload *dmo;
+    ofproto_meter_id meter_id;
+    uint32_t ret;
+    meter_id.uint32 = mid;
+
+    ret = dpif_meter_get_offload(dpif, meter_id, (void **)&nom,
+                                 sizeof *nom + sizeof *dmo);
+    if (ret) {
+        VLOG_INFO("netdev offload dpdk meter, can't get the meter");
+        return NULL;
+    }
+
+    if (!nom) {
+        return netdev_offload_dpdk_meter_create(dpif, netdev, mid);
+    }
+
+    dmo = (struct dpdk_meter_offload *)nom->data;
+    if (port_id != dmo->port_id) {
+        VLOG_INFO("dpdk meter %d is used on %d, can't be used for : %d",
+                  mid, dmo->port_id, port_id);
+        return NULL;
+    }
+
+    return &dmo->mc;
+}
     
 static int
-netdev_offload_dpdk_add_flow(struct netdev *netdev,
+netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const struct match *match,
                              struct nlattr *nl_actions,
                              size_t actions_len,
@@ -648,7 +783,17 @@ netdev_offload_dpdk_add_flow(struct netdev *netdev,
         case OVS_ACTION_ATTR_CT_CLEAR:
         case OVS_ACTION_ATTR_PUSH_NSH:
         case OVS_ACTION_ATTR_POP_NSH:
-        case OVS_ACTION_ATTR_METER:
+        case OVS_ACTION_ATTR_METER: {
+            struct rte_flow_action_meter *mc;
+            mc = netdev_offload_dpdk_meter_update(dpif, netdev, nl_attr_get_u32(a));
+            if (mc) {
+                VLOG_INFO("add flow action: RTE_FLOW_ACTION_TYPE_METER: %d", RTE_FLOW_ACTION_TYPE_METER);
+                add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_METER, mc);
+            } else {
+                VLOG_INFO("Can't get the rte flow meter, meter offload fail");
+            }
+            break;
+        }
         case OVS_ACTION_ATTR_TUNNEL_PUSH:
         case OVS_ACTION_ATTR_TUNNEL_POP:
         case OVS_ACTION_ATTR_CLONE:
@@ -778,7 +923,7 @@ netdev_offload_dpdk_destroy_flow(struct netdev *netdev,
 }
 
 static int
-netdev_offload_dpdk_flow_put(struct dpif *dpif OVS_UNUSED, struct netdev *netdev,
+netdev_offload_dpdk_flow_put(struct dpif *dpif, struct netdev *netdev,
                              struct match *match, struct nlattr *actions,
                              size_t actions_len, const ovs_u128 *ufid,
                              struct offload_info *info,
@@ -804,7 +949,7 @@ netdev_offload_dpdk_flow_put(struct dpif *dpif OVS_UNUSED, struct netdev *netdev
         return ret;
     }
 
-    return netdev_offload_dpdk_add_flow(netdev, match, actions,
+    return netdev_offload_dpdk_add_flow(dpif, netdev, match, actions,
                                         actions_len, ufid, info);
 }
 
