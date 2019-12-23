@@ -3306,6 +3306,27 @@ const struct netdev_class netdev_afxdp_class = {
 #endif
 
 
+static bool
+is_linux_class(const struct netdev_class *class)
+{
+    if (class->destruct == netdev_linux_destruct) {
+        return true;
+    }
+#ifdef HAVE_AF_XDP
+    if (class->destruct == netdev_afxdp_destruct) {
+        return true;
+    }
+#endif
+
+    return false;
+}
+
+bool
+netdev_linux_flow_api_supported(const struct netdev *netdev)
+{
+    return is_linux_class(netdev->netdev_class);
+}
+
 #define CODEL_N_QUEUES 0x0000
 
 /* In sufficiently new kernel headers these are defined as enums in

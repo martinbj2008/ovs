@@ -1569,6 +1569,10 @@ netdev_tc_init_flow_api(struct netdev *netdev)
     int ifindex;
     int error;
 
+    if (!netdev_linux_flow_api_supported(netdev)) {
+        return EOPNOTSUPP;
+    }
+
     ifindex = netdev_get_ifindex(netdev);
     if (ifindex < 0) {
         VLOG_INFO("init: failed to get ifindex for %s: %s",
