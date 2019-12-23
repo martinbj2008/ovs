@@ -101,13 +101,15 @@ DEFINE_STATIC_PER_THREAD_DATA(uint32_t, recirc_depth, 0)
 #define GET_INPORT_ID_BY_SPEC_RECIRC_ID(id) (id & 0xFF)
 
 /* Configuration parameters. */
-enum { MAX_FLOWS = 200000 };     /* Maximum number of flows in flow table. */
 enum { MAX_METERS = 65536 };    /* Maximum number of meters. */
 enum { MAX_BANDS = 8 };         /* Maximum number of bands / meter. */
 enum { N_METER_LOCKS = 64 };    /* Maximum number of meters. */
 
 /* Protects against changes to 'dp_netdevs'. */
 static struct ovs_mutex dp_netdev_mutex = OVS_MUTEX_INITIALIZER;
+
+/* Maximum number of flows in flow table. */
+static uint32_t netdev_max_flows = 200000;
 
 /* Contains all 'struct dp_netdev's. */
 static struct shash dp_netdevs OVS_GUARDED_BY(dp_netdev_mutex)
@@ -1125,6 +1127,43 @@ pmd_info_show_perf(struct ds *reply,
     dump_subtable_address(pmd);
 }
 
+static void
+dpif_netdev_set_max_flow(struct unixctl_conn *conn,
+                         int argc OVS_UNUSED,
+                         const char *argv[],
+                         void *aux OVS_UNUSED)
+{
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    uint32_t max_flows = atoi(argv[1]);
+
+    if (!max_flows) {
+        unixctl_command_reply_error(conn,
+                                    "the max flow capacity should > 0");
+        return;
+    }
+
+    netdev_max_flows = max_flows;
+    ds_put_format(&ds, "set netdev_max_flows to %u\n", netdev_max_flows);
+    unixctl_command_reply(conn, ds_cstr(&ds));
+    
+    ds_destroy(&ds);
+}
+
+static void
+dpif_netdev_show_max_flow(struct unixctl_conn *conn,
+                          int argc OVS_UNUSED,
+                          const char *argv[] OVS_UNUSED,
+                          void *aux OVS_UNUSED)
+{
+    struct ds reply = DS_EMPTY_INITIALIZER;
+
+    ds_put_format(&reply,"pmd flow capacity: %u\n",
+                  netdev_max_flows);
+    unixctl_command_reply(conn, ds_cstr(&reply));
+
+    ds_destroy(&reply);
+}
+
 static int
 compare_poll_list(const void *a_, const void *b_)
 {
@@ -1428,6 +1467,14 @@ dpif_netdev_init(void)
                              "on|off [-b before] [-a after] [-e|-ne] "
                              "[-us usec] [-q qlen]",
                              0, 10, pmd_perf_log_set_cmd,
+                             NULL);
+    unixctl_command_register("dpif-netdev/pmd-set-flow-capacity",
+                             "max-flow-number",
+                             1, 1, dpif_netdev_set_max_flow,
+                             NULL);
+    unixctl_command_register("dpif-netdev/pmd-show-flow-capacity",
+                             "",
+                             0, 0, dpif_netdev_show_max_flow,
                              NULL);
     return 0;
 }
@@ -3384,7 +3431,7 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
 
     if (!netdev_flow) {
         if (put->flags & DPIF_FP_CREATE) {
-            if (cmap_count(&pmd->flow_table) < MAX_FLOWS) {
+            if (cmap_count(&pmd->flow_table) < netdev_max_flows) {
                 dp_netdev_flow_add(pmd, match, ufid, put->priority, put->actions,
                                    put->actions_len);
                 error = 0;
