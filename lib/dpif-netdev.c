@@ -96,7 +96,9 @@ DEFINE_STATIC_PER_THREAD_DATA(uint32_t, recirc_depth, 0)
 /* Use instant packet send by default. */
 #define DEFAULT_TX_FLUSH_INTERVAL 0
 
-#define RECIRC_ID_PUSH_VXLAN 0xFF000001
+#define RECIRC_ID_SPEC_PATTERN 0xFF000000
+#define IS_SPEC_RECIRC_ID(id) ((id & RECIRC_ID_SPEC_PATTERN) == RECIRC_ID_SPEC_PATTERN)
+#define GET_INPORT_ID_BY_SPEC_RECIRC_ID(id) (id & 0xFF)
 
 /* Configuration parameters. */
 enum { MAX_FLOWS = 200000 };     /* Maximum number of flows in flow table. */
@@ -2450,6 +2452,7 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
     }
     info.flow_mark = mark;
     info.dpif_class = pmd->dp->class;
+    info.priority = flow->priority;
 
     ovs_mutex_lock(&pmd->dp->port_mutex);
     port = dp_netdev_lookup_port(pmd->dp, in_port);
@@ -7317,8 +7320,9 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
             struct dp_packet *packet;
             DP_PACKET_BATCH_FOR_EACH (i, packet, packets_) {
                 packet->md.recirc_id = nl_attr_get_u32(a);
-                if (packet->md.recirc_id == RECIRC_ID_PUSH_VXLAN)
-                    packet->md.in_port.odp_port = 0;
+
+                if (IS_SPEC_RECIRC_ID(packet->md.recirc_id))
+                    packet->md.in_port.odp_port = GET_INPORT_ID_BY_SPEC_RECIRC_ID(packet->md.recirc_id);
             }
 
             (*depth)++;

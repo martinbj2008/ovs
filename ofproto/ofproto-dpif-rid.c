@@ -37,7 +37,7 @@ static struct ovs_list expired OVS_GUARDED_BY(mutex)
 static uint32_t next_id OVS_GUARDED_BY(mutex) = 1; /* Possible next free id. */
 
 #define RECIRC_POOL_STATIC_IDS_MIN 1024
-#define RECIRC_POOL_STATIC_IDS_MAX 0xFF000000
+#define RECIRC_POOL_STATIC_IDS_MAX 0xFEFFFFFF
 /* RECIRC_ID_PUSH_VXLAN (0xFF000001): recirc_id used for vxlan push action*/
 
 static void recirc_id_node_free(struct recirc_id_node *);

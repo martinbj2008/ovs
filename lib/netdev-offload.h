@@ -72,6 +72,7 @@ struct offload_info {
      * it will be in the pkt meta data.
      */
     uint32_t flow_mark;
+    uint32_t priority;
 };
 
 int netdev_flow_flush(struct netdev *);

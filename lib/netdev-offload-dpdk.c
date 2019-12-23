@@ -31,6 +31,25 @@
 
 VLOG_DEFINE_THIS_MODULE(netdev_offload_dpdk);
 
+enum {
+    OFFLOAD_TABLE_ID_FLOW = 0,
+    OFFLOAD_TABLE_ID_VXLAN,
+};
+
+typedef enum {
+    OFFLOAD_RECIRC_UNKOWN = -1,
+    OFFLOAD_RECIRC_VXLAN = 0,
+    OFFLOAD_RECIRC_BLACKLIST,
+    OFFLOAD_RECIRC_WHITELIST,
+}RECIRC_TYPE;
+
+#define OFFLOAD_TABLE_MIN_PRIORITY 3
+#define OFFLOAD_TABLE_MAX_PRIORITY 0
+
+#define GET_RECIRC_TYPE_BY_ID(id) ((id >> 16) & 0xF)
+#define RECIRC_ID_SPEC_PATTERN 0xFF000000
+#define IS_SPEC_RECIRC_ID(id) ((id & RECIRC_ID_SPEC_PATTERN) == RECIRC_ID_SPEC_PATTERN)
+
 /* Thread-safety
  * =============
  *
@@ -365,7 +384,7 @@ dump_flow_action(struct rte_flow_action *action)
 
     ds_init(&s);
 
-    VLOG_DBG("\naction->type: %d\n", action->type);
+    VLOG_INFO("\naction->type: %d\n", action->type);
 
     if (action->type == RTE_FLOW_ACTION_TYPE_PORT_ID) {
         const struct rte_flow_action_port_id *output = action->conf;
@@ -373,7 +392,29 @@ dump_flow_action(struct rte_flow_action *action)
                 output->original, output->id);
     }
 
-    VLOG_DBG("%s", ds_cstr(&s));
+    if (action->type == RTE_FLOW_ACTION_TYPE_RAW_ENCAP) {
+        const struct rte_flow_action_raw_encap *raw_encap = action->conf;
+        int i;
+        ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_RAW_ENCAP:\n");
+
+        for (i = 0; i < raw_encap->size; i++) {
+            ds_put_format(&s, "%x", raw_encap->data[i]);
+        }
+
+        ds_put_cstr(&s, "\n");
+    }
+
+    if (action->type == RTE_FLOW_ACTION_TYPE_VXLAN_DECAP) {
+        ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_VXLAN_DECAP\n");
+    }
+
+    if (action->type == RTE_FLOW_ACTION_TYPE_JUMP) {
+        const uint32_t *dtable = action->conf;
+        ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_JUMP\n");
+        ds_put_format(&s, "dst table is %d", *dtable);
+    }
+
+    VLOG_INFO("%s", ds_cstr(&s));
     ds_destroy(&s);
 }
 
@@ -553,6 +594,135 @@ netdev_offload_dpdk_meter_update(struct dpif *dpif, struct netdev *netdev, uint3
     return &dmo->mc;
 }
 
+static int netdev_offload_map_flow_priority(struct rte_flow_attr * flow_attr, struct offload_info * info) {
+    uint32_t priority = info->priority;
+
+    //dpcls priority support 0-16, but hw only support 0-3
+    if (priority > 16) {
+        VLOG_INFO("DPCLS flow priority error, we only support 0-16, config priority is %d", priority);
+        return -1;
+    }
+
+    if (priority > 0) {
+        priority = (priority -1)/4;
+    }
+
+    flow_attr->priority = OFFLOAD_TABLE_MIN_PRIORITY - priority;
+    return 0;
+}
+
+static int netdev_offload_jump_group_action(struct rte_flow_attr * flow_attr, RECIRC_TYPE type, uint32_t *dst_table) {
+    int ret = 0;
+
+    switch (type) {
+        case OFFLOAD_RECIRC_VXLAN:
+            flow_attr->group = OFFLOAD_TABLE_ID_FLOW;
+            *dst_table = OFFLOAD_TABLE_ID_VXLAN;
+            break;
+        case OFFLOAD_RECIRC_WHITELIST:
+        case OFFLOAD_RECIRC_BLACKLIST:
+            ret = -1;
+            VLOG_INFO("Unsupport recirc offload type: %d", type);
+            break;
+
+        case OFFLOAD_RECIRC_UNKOWN:
+        default:
+            ret = -1;
+            VLOG_INFO("Unsupport recirc offload type: %d", type);
+            break;
+    }
+
+    return ret;
+}
+
+struct Offload_Set_Action {
+    struct rte_flow_action_set_mac mac;
+    struct rte_flow_action_set_tp nw_tp;
+    struct rte_flow_action_set_ipv4 ipv4;
+};
+
+#define ETH_ALEN  RTE_ETHER_ADDR_LEN
+/* Mask is at the midpoint of the data. */
+#define get_mask(a, type) ((const type *)(const void *)(a + 1) + 1)
+
+static int netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, struct Offload_Set_Action* SetAct) {
+    enum ovs_key_attr type = nl_attr_type(a);
+    uint8_t ethernet_mask_full[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
+    VLOG_INFO("########set Action  type: %d########", type);
+    switch (type) {
+    case OVS_KEY_ATTR_ETHERNET: {
+            const struct ovs_key_ethernet *key = nl_attr_get(a);
+            const struct ovs_key_ethernet *mask = get_mask(a, struct ovs_key_ethernet);
+            if (!memcmp(mask->eth_src.ea,  &ethernet_mask_full, ETH_ALEN)) {
+                memcpy(&SetAct->mac.mac_addr[0], &key->eth_src.ea[0], ETH_ALEN);
+                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_SRC, &SetAct->mac);
+                VLOG_INFO("Set src Mac offload: %02x:%02x:%02x:%02x:%02x:%02x", SetAct->mac.mac_addr[0],SetAct->mac.mac_addr[1]
+                        ,SetAct->mac.mac_addr[2],SetAct->mac.mac_addr[3],SetAct->mac.mac_addr[4],SetAct->mac.mac_addr[5]);
+            }
+
+            if (!memcmp(mask->eth_dst.ea,  &ethernet_mask_full, ETH_ALEN)) {
+                memcpy(SetAct->mac.mac_addr, key->eth_dst.ea, ETH_ALEN);
+                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_DST, &SetAct->mac);
+                VLOG_INFO("Set dst Mac offload: %02x:%02x:%02x:%02x:%02x:%02x", SetAct->mac.mac_addr[0],SetAct->mac.mac_addr[1]
+                        ,SetAct->mac.mac_addr[2],SetAct->mac.mac_addr[3],SetAct->mac.mac_addr[4],SetAct->mac.mac_addr[5]);
+
+            }
+            break;
+        }
+    case OVS_KEY_ATTR_IPV4:
+        break;
+
+    case OVS_KEY_ATTR_TCP:
+        break;
+
+    case OVS_KEY_ATTR_UDP:
+        break;
+
+    case OVS_KEY_ATTR_PRIORITY:
+    case OVS_KEY_ATTR_IN_PORT:
+    case OVS_KEY_ATTR_VLAN:
+    case OVS_KEY_ATTR_ICMP:
+    case OVS_KEY_ATTR_ICMPV6:
+    case OVS_KEY_ATTR_ND:
+    case OVS_KEY_ATTR_ND_EXTENSIONS:
+    case OVS_KEY_ATTR_SKB_MARK:
+    case OVS_KEY_ATTR_TUNNEL:
+    case OVS_KEY_ATTR_SCTP:
+    case OVS_KEY_ATTR_DP_HASH:
+    case OVS_KEY_ATTR_RECIRC_ID:
+    case OVS_KEY_ATTR_MPLS:
+    case OVS_KEY_ATTR_CT_STATE:
+    case OVS_KEY_ATTR_CT_ZONE:
+    case OVS_KEY_ATTR_CT_MARK:
+    case OVS_KEY_ATTR_CT_LABELS:
+    case OVS_KEY_ATTR_PACKET_TYPE:
+    case OVS_KEY_ATTR_NSH:
+    case OVS_KEY_ATTR_ENCAP:
+    case OVS_KEY_ATTR_ETHERTYPE:
+    case OVS_KEY_ATTR_IPV6:
+    case OVS_KEY_ATTR_ARP:
+    case OVS_KEY_ATTR_TCP_FLAGS:
+    case OVS_KEY_ATTR_CT_ORIG_TUPLE_IPV4:
+    case OVS_KEY_ATTR_CT_ORIG_TUPLE_IPV6:
+    case OVS_KEY_ATTR_UNSPEC:
+    case __OVS_KEY_ATTR_MAX:
+    default:
+        VLOG_INFO("Not support Set type %d offload!", type);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int netdev_offload_is_vxlan_encap_split(const struct match * match) {
+    if (match->wc.masks.recirc_id && (IS_SPEC_RECIRC_ID(match->flow.recirc_id))) {
+        return 1;
+    }
+
+    return 0;
+}
+
 static int
 netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const struct match *match,
@@ -561,9 +731,9 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const ovs_u128 *ufid,
                              struct offload_info *info)
 {
-    const struct rte_flow_attr flow_attr = {
-        .group = 0,
-        .priority = 0,
+    struct rte_flow_attr flow_attr = {
+        .group = OFFLOAD_TABLE_ID_FLOW,
+        .priority = OFFLOAD_TABLE_MIN_PRIORITY,
         .ingress = 1,
         .egress = 0,
         .transfer = 1,
@@ -589,9 +759,14 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     memset(&spec, 0, sizeof spec);
     memset(&mask, 0, sizeof mask);
 
+    ret = netdev_offload_map_flow_priority(&flow_attr, info);
+    if (ret)
+        return ret;
+
     /* Eth */
     if (!eth_addr_is_zero(match->wc.masks.dl_src) ||
-        !eth_addr_is_zero(match->wc.masks.dl_dst)) {
+        !eth_addr_is_zero(match->wc.masks.dl_dst) ||
+        match->wc.masks.dl_type) {
         memcpy(&spec.eth.dst, &match->flow.dl_dst, sizeof spec.eth.dst);
         memcpy(&spec.eth.src, &match->flow.dl_src, sizeof spec.eth.src);
         spec.eth.type = match->flow.dl_type;
@@ -738,6 +913,10 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
 
     int out_put_action_cnt = 0;
     struct rte_flow_action_port_id port_id;
+    struct rte_flow_action_raw_encap raw_encap = {0};
+    uint32_t dst_tbl = 0;
+    const uint32_t* recirc_id;
+    struct Offload_Set_Action SetAction;
 
     NL_ATTR_FOR_EACH_UNSAFE (a, left, nl_actions, actions_len) {
         int type = nl_attr_type(a);
@@ -769,25 +948,6 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             out_put_action_cnt ++;
             break;
         }
-        case OVS_ACTION_ATTR_CHECK_PKT_LEN:
-        case OVS_ACTION_ATTR_PUSH_VLAN:
-        case OVS_ACTION_ATTR_POP_VLAN:
-        case OVS_ACTION_ATTR_UNSPEC:
-        case OVS_ACTION_ATTR_USERSPACE:
-        case OVS_ACTION_ATTR_SET:
-        case OVS_ACTION_ATTR_SAMPLE:
-        case OVS_ACTION_ATTR_RECIRC:
-        case OVS_ACTION_ATTR_HASH:
-        case OVS_ACTION_ATTR_PUSH_MPLS:
-        case OVS_ACTION_ATTR_POP_MPLS:
-        case OVS_ACTION_ATTR_SET_MASKED:
-        case OVS_ACTION_ATTR_CT:
-        case OVS_ACTION_ATTR_TRUNC:
-        case OVS_ACTION_ATTR_PUSH_ETH:
-        case OVS_ACTION_ATTR_POP_ETH:
-        case OVS_ACTION_ATTR_CT_CLEAR:
-        case OVS_ACTION_ATTR_PUSH_NSH:
-        case OVS_ACTION_ATTR_POP_NSH:
         case OVS_ACTION_ATTR_METER: {
             struct rte_flow_action_meter *mc;
             mc = netdev_offload_dpdk_meter_update(dpif, netdev, nl_attr_get_u32(a));
@@ -799,9 +959,63 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             }
             break;
         }
-        case OVS_ACTION_ATTR_TUNNEL_PUSH:
+        case OVS_ACTION_ATTR_RECIRC: {
+            RECIRC_TYPE recirc_type = OFFLOAD_RECIRC_UNKOWN;
+            recirc_id = nl_attr_get(a);
+            if (recirc_id == NULL || !IS_SPEC_RECIRC_ID(*recirc_id)) {
+                VLOG_INFO("Unsupported this recirc id action: %d", ((recirc_id==NULL) ? -1: *recirc_id));
+                continue;
+            }
+            recirc_type = GET_RECIRC_TYPE_BY_ID(*recirc_id);
+            ret = netdev_offload_jump_group_action(&flow_attr, recirc_type, &dst_tbl);
+            if (ret) {
+                VLOG_INFO("Get recirc type by id failed! id=%d", *recirc_id);
+                continue;
+            }
+
+            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_JUMP, &dst_tbl);
+            break;
+        }
+        case OVS_ACTION_ATTR_TUNNEL_PUSH: {
+            const struct ovs_action_push_tnl *tunnel = nl_attr_get(a);
+
+            raw_encap.data = (uint8_t *)tunnel->header;
+            raw_encap.preserve = NULL;
+            raw_encap.size = tunnel->header_len;
+            if (netdev_offload_is_vxlan_encap_split(match))
+                flow_attr.group = OFFLOAD_TABLE_ID_VXLAN;
+
+            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_RAW_ENCAP, &raw_encap);
+            break;
+        }
         case OVS_ACTION_ATTR_TUNNEL_POP:
+            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
+            break;
+        case OVS_ACTION_ATTR_SET_MASKED:
+            ret = netdev_offload_set_action(nl_attr_get(a), &actions, &SetAction);
+            if (ret) {
+                VLOG_INFO("Set Action offload return error  %d", ret);
+                continue;
+            }
+            break;
         case OVS_ACTION_ATTR_CLONE:
+        case OVS_ACTION_ATTR_HASH:
+        case OVS_ACTION_ATTR_PUSH_MPLS:
+        case OVS_ACTION_ATTR_POP_MPLS:
+        case OVS_ACTION_ATTR_CHECK_PKT_LEN:
+        case OVS_ACTION_ATTR_PUSH_VLAN:
+        case OVS_ACTION_ATTR_POP_VLAN:
+        case OVS_ACTION_ATTR_UNSPEC:
+        case OVS_ACTION_ATTR_USERSPACE:
+        case OVS_ACTION_ATTR_SET:
+        case OVS_ACTION_ATTR_SAMPLE:
+        case OVS_ACTION_ATTR_CT:
+        case OVS_ACTION_ATTR_TRUNC:
+        case OVS_ACTION_ATTR_PUSH_ETH:
+        case OVS_ACTION_ATTR_POP_ETH:
+        case OVS_ACTION_ATTR_CT_CLEAR:
+        case OVS_ACTION_ATTR_PUSH_NSH:
+        case OVS_ACTION_ATTR_POP_NSH:
         case __OVS_ACTION_ATTR_MAX:
         default:
             VLOG_INFO("%s: only support output action\n", netdev_get_name(netdev));
@@ -853,11 +1067,6 @@ netdev_offload_dpdk_validate_flow(const struct match *match)
 
     if (masks->metadata || masks->skb_priority ||
         masks->pkt_mark || masks->dp_hash) {
-        goto err;
-    }
-
-    /* recirc id must be zero. */
-    if (match_zero_wc.flow.recirc_id) {
         goto err;
     }
 
