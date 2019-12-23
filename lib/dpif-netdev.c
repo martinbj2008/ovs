@@ -1674,7 +1674,7 @@ dp_delete_meter(struct dp_netdev *dp, uint32_t meter_id)
         if (dp->meters[meter_id]->offload) {
             struct netdev_offload_meter *nom;
             nom = dp->meters[meter_id]->offload;
-            
+
             nom->netdev_offload_meter_cb(nom->data);
             free(nom);
         }
@@ -5951,7 +5951,7 @@ dpif_netdev_meter_get_config(struct dpif *dpif,
     if (mid >= MAX_METERS) {
         return -1;
     }
-    
+
     meter_lock(dp, mid);
     meter = dp->meters[mid];
     if (!meter) {
@@ -5983,14 +5983,14 @@ dpif_netdev_meter_set_offload(struct dpif *dpif,
     if (mid >= MAX_METERS) {
         return -1;
     }
-    
+
     meter_lock(dp, mid);
     meter = dp->meters[mid];
     if (!meter) {
         ret = -1;
         goto done;
     }
-    
+
     meter->offload = (struct netdev_offload_meter *)data;
 done:
     meter_unlock(dp, mid);
@@ -6010,14 +6010,14 @@ dpif_netdev_meter_get_offload(struct dpif *dpif,
     if (mid >= MAX_METERS) {
         return -1;
     }
-    
+
     meter_lock(dp, mid);
     meter = dp->meters[mid];
     if (!meter) {
         ret = -1;
         goto done;
     }
-    
+
     *data = NULL;
     if (meter->offload) {
         *data = xmemdup(meter->offload, size);
