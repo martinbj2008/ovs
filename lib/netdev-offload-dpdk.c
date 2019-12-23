@@ -372,7 +372,7 @@ dump_flow_action(struct rte_flow_action *action)
         ds_put_format(&s, "\nRTE_FLOW_ACTION_TYPE_PORT_ID original: %d, id: %d\n",
                 output->original, output->id);
     }
-    
+
     VLOG_DBG("%s", ds_cstr(&s));
     ds_destroy(&s);
 }
@@ -416,7 +416,7 @@ netdev_offload_dpdk_dump(struct flow_patterns *patterns,
     for (i = 0; i < actions->cnt; i++) {
         dump_flow_action(&actions->actions[i]);
     }
-    
+
     VLOG_INFO("XXX: dump rte pattern and aciton end!\n");
 }
 
@@ -429,7 +429,7 @@ static void netdev_offload_dpdk_meter_destroy(void *data)
 {
     struct dpdk_meter_offload *dmo = data;
     struct rte_mtr_error error;
-    
+
     if (dmo) {
         rte_mtr_meter_profile_delete(dmo->port_id,
                                      dmo->mc.mtr_id,
@@ -458,7 +458,7 @@ netdev_offload_dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint3
     int ret;
 
     meter_id.uint32 = mid;
-    
+
     if (dpif_meter_get_config(dpif, meter_id, &config)) {
         return NULL;
     }
@@ -508,7 +508,7 @@ netdev_offload_dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint3
     }
 
     dpif_meter_set_offload(dpif, meter_id, nom);
-    
+
     free(config.bands);
     return &dmo->mc;
 
@@ -552,7 +552,7 @@ netdev_offload_dpdk_meter_update(struct dpif *dpif, struct netdev *netdev, uint3
 
     return &dmo->mc;
 }
-    
+
 static int
 netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const struct match *match,
@@ -757,10 +757,15 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                 continue;
             }
 
+            if (strncmp(dst_netdev->netdev_class->type, "dpdk", 4) != 0) {
+                VLOG_INFO("can't offload output port to non-dpdk port. dp port id: %d\n", odp_port);
+                continue;
+            }
+
             port_id.id = netdev_dpdk_get_portid(dst_netdev);
             port_id.original = 0;
             add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_PORT_ID, &port_id);
-            
+
             out_put_action_cnt ++;
             break;
         }
