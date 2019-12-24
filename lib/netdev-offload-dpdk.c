@@ -374,6 +374,30 @@ add_flow_pattern(struct flow_patterns *patterns, enum rte_flow_item_type type,
 }
 
 static void
+dump_set_action(struct ds* ps, struct rte_flow_action *action)
+{
+    const struct rte_flow_action_set_mac *pmac = NULL;
+
+    if (action->type == RTE_FLOW_ACTION_TYPE_SET_MAC_SRC) {
+        pmac = action->conf;
+        ds_put_cstr(ps, "\nRTE_FLOW_ACTION_TYPE_SET_MAC_SRC\n");
+        ds_put_format(ps, "set mac addr %02x:%02x:%02x:%02x:%02x:%02x",
+                pmac->mac_addr[0], pmac->mac_addr[1], pmac->mac_addr[2],
+                pmac->mac_addr[3], pmac->mac_addr[4], pmac->mac_addr[5]);
+    }
+
+    if (action->type == RTE_FLOW_ACTION_TYPE_SET_MAC_DST) {
+        pmac = action->conf;
+        ds_put_cstr(ps, "\nRTE_FLOW_ACTION_TYPE_SET_MAC_DST\n");
+        ds_put_format(ps, "set mac addr %02x:%02x:%02x:%02x:%02x:%02x",
+                pmac->mac_addr[0], pmac->mac_addr[1], pmac->mac_addr[2],
+                pmac->mac_addr[3], pmac->mac_addr[4], pmac->mac_addr[5]);
+
+    }
+    return;
+}
+
+static void
 dump_flow_action(struct rte_flow_action *action)
 {
     struct ds s;
@@ -413,6 +437,8 @@ dump_flow_action(struct rte_flow_action *action)
         ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_JUMP\n");
         ds_put_format(&s, "dst table is %d", *dtable);
     }
+
+    dump_set_action(&s, action);
 
     VLOG_DBG("%s", ds_cstr(&s));
     ds_destroy(&s);
@@ -655,7 +681,6 @@ netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, 
     uint8_t ethernet_mask_full[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
     enum ovs_key_attr type = nl_attr_type(a);
 
-    VLOG_INFO("########set Action  type: %d########", type);
     switch (type) {
     case OVS_KEY_ATTR_ETHERNET: {
             const struct ovs_key_ethernet *key = nl_attr_get(a);
@@ -663,19 +688,11 @@ netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, 
             if (!memcmp(mask->eth_src.ea,  &ethernet_mask_full, ETH_ALEN)) {
                 memcpy(&setact->mac.mac_addr[0], &key->eth_src.ea[0], ETH_ALEN);
                 add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_SRC, &setact->mac);
-                VLOG_INFO("Set src Mac offload: %02x:%02x:%02x:%02x:%02x:%02x",
-                        setact->mac.mac_addr[0],setact->mac.mac_addr[1],
-                        setact->mac.mac_addr[2],setact->mac.mac_addr[3],
-                        setact->mac.mac_addr[4],setact->mac.mac_addr[5]);
             }
 
             if (!memcmp(mask->eth_dst.ea,  &ethernet_mask_full, ETH_ALEN)) {
                 memcpy(setact->mac.mac_addr, key->eth_dst.ea, ETH_ALEN);
                 add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_DST, &setact->mac);
-                VLOG_INFO("Set dst Mac offload: %02x:%02x:%02x:%02x:%02x:%02x",
-                        setact->mac.mac_addr[0],setact->mac.mac_addr[1],
-                        setact->mac.mac_addr[2],setact->mac.mac_addr[3],
-                        setact->mac.mac_addr[4],setact->mac.mac_addr[5]);
 
             }
             break;
