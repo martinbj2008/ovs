@@ -384,7 +384,7 @@ dump_flow_action(struct rte_flow_action *action)
 
     ds_init(&s);
 
-    VLOG_INFO("\naction->type: %d\n", action->type);
+    VLOG_DBG("\naction->type: %d\n", action->type);
 
     if (action->type == RTE_FLOW_ACTION_TYPE_PORT_ID) {
         const struct rte_flow_action_port_id *output = action->conf;
@@ -414,7 +414,7 @@ dump_flow_action(struct rte_flow_action *action)
         ds_put_format(&s, "dst table is %d", *dtable);
     }
 
-    VLOG_INFO("%s", ds_cstr(&s));
+    VLOG_DBG("%s", ds_cstr(&s));
     ds_destroy(&s);
 }
 
@@ -594,7 +594,9 @@ netdev_offload_dpdk_meter_update(struct dpif *dpif, struct netdev *netdev, uint3
     return &dmo->mc;
 }
 
-static int netdev_offload_map_flow_priority(struct rte_flow_attr * flow_attr, struct offload_info * info) {
+static int
+netdev_offload_map_flow_priority(struct rte_flow_attr * flow_attr, struct offload_info * info)
+{
     uint32_t priority = info->priority;
 
     //dpcls priority support 0-16, but hw only support 0-3
@@ -611,7 +613,9 @@ static int netdev_offload_map_flow_priority(struct rte_flow_attr * flow_attr, st
     return 0;
 }
 
-static int netdev_offload_jump_group_action(struct rte_flow_attr * flow_attr, RECIRC_TYPE type, uint32_t *dst_table) {
+static int
+netdev_offload_jump_group_action(struct rte_flow_attr * flow_attr, RECIRC_TYPE type, uint32_t *dst_table)
+{
     int ret = 0;
 
     switch (type) {
@@ -635,7 +639,7 @@ static int netdev_offload_jump_group_action(struct rte_flow_attr * flow_attr, RE
     return ret;
 }
 
-struct Offload_Set_Action {
+struct netdev_offload_set_action {
     struct rte_flow_action_set_mac mac;
     struct rte_flow_action_set_tp nw_tp;
     struct rte_flow_action_set_ipv4 ipv4;
@@ -645,9 +649,11 @@ struct Offload_Set_Action {
 /* Mask is at the midpoint of the data. */
 #define get_mask(a, type) ((const type *)(const void *)(a + 1) + 1)
 
-static int netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, struct Offload_Set_Action* SetAct) {
-    enum ovs_key_attr type = nl_attr_type(a);
+static int
+netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, struct netdev_offload_set_action* setact)
+{
     uint8_t ethernet_mask_full[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    enum ovs_key_attr type = nl_attr_type(a);
 
     VLOG_INFO("########set Action  type: %d########", type);
     switch (type) {
@@ -655,17 +661,21 @@ static int netdev_offload_set_action(const struct nlattr *a, struct flow_actions
             const struct ovs_key_ethernet *key = nl_attr_get(a);
             const struct ovs_key_ethernet *mask = get_mask(a, struct ovs_key_ethernet);
             if (!memcmp(mask->eth_src.ea,  &ethernet_mask_full, ETH_ALEN)) {
-                memcpy(&SetAct->mac.mac_addr[0], &key->eth_src.ea[0], ETH_ALEN);
-                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_SRC, &SetAct->mac);
-                VLOG_INFO("Set src Mac offload: %02x:%02x:%02x:%02x:%02x:%02x", SetAct->mac.mac_addr[0],SetAct->mac.mac_addr[1]
-                        ,SetAct->mac.mac_addr[2],SetAct->mac.mac_addr[3],SetAct->mac.mac_addr[4],SetAct->mac.mac_addr[5]);
+                memcpy(&setact->mac.mac_addr[0], &key->eth_src.ea[0], ETH_ALEN);
+                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_SRC, &setact->mac);
+                VLOG_INFO("Set src Mac offload: %02x:%02x:%02x:%02x:%02x:%02x",
+                        setact->mac.mac_addr[0],setact->mac.mac_addr[1],
+                        setact->mac.mac_addr[2],setact->mac.mac_addr[3],
+                        setact->mac.mac_addr[4],setact->mac.mac_addr[5]);
             }
 
             if (!memcmp(mask->eth_dst.ea,  &ethernet_mask_full, ETH_ALEN)) {
-                memcpy(SetAct->mac.mac_addr, key->eth_dst.ea, ETH_ALEN);
-                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_DST, &SetAct->mac);
-                VLOG_INFO("Set dst Mac offload: %02x:%02x:%02x:%02x:%02x:%02x", SetAct->mac.mac_addr[0],SetAct->mac.mac_addr[1]
-                        ,SetAct->mac.mac_addr[2],SetAct->mac.mac_addr[3],SetAct->mac.mac_addr[4],SetAct->mac.mac_addr[5]);
+                memcpy(setact->mac.mac_addr, key->eth_dst.ea, ETH_ALEN);
+                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_DST, &setact->mac);
+                VLOG_INFO("Set dst Mac offload: %02x:%02x:%02x:%02x:%02x:%02x",
+                        setact->mac.mac_addr[0],setact->mac.mac_addr[1],
+                        setact->mac.mac_addr[2],setact->mac.mac_addr[3],
+                        setact->mac.mac_addr[4],setact->mac.mac_addr[5]);
 
             }
             break;
@@ -715,7 +725,8 @@ static int netdev_offload_set_action(const struct nlattr *a, struct flow_actions
     return 0;
 }
 
-static int netdev_offload_is_vxlan_encap_split(const struct match * match) {
+static int
+netdev_offload_is_vxlan_encap_split(const struct match * match) {
     if (match->wc.masks.recirc_id && (IS_SPEC_RECIRC_ID(match->flow.recirc_id))) {
         return 1;
     }
@@ -916,7 +927,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     struct rte_flow_action_raw_encap raw_encap = {0};
     uint32_t dst_tbl = 0;
     const uint32_t* recirc_id;
-    struct Offload_Set_Action SetAction;
+    struct netdev_offload_set_action set_action;
 
     NL_ATTR_FOR_EACH_UNSAFE (a, left, nl_actions, actions_len) {
         int type = nl_attr_type(a);
@@ -982,8 +993,9 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             raw_encap.data = (uint8_t *)tunnel->header;
             raw_encap.preserve = NULL;
             raw_encap.size = tunnel->header_len;
-            if (netdev_offload_is_vxlan_encap_split(match))
+            if (netdev_offload_is_vxlan_encap_split(match)) {
                 flow_attr.group = OFFLOAD_TABLE_ID_VXLAN;
+            }
 
             add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_RAW_ENCAP, &raw_encap);
             break;
@@ -992,7 +1004,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
             break;
         case OVS_ACTION_ATTR_SET_MASKED:
-            ret = netdev_offload_set_action(nl_attr_get(a), &actions, &SetAction);
+            ret = netdev_offload_set_action(nl_attr_get(a), &actions, &set_action);
             if (ret) {
                 VLOG_INFO("Set Action offload return error  %d", ret);
                 continue;
