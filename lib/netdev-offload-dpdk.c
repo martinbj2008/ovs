@@ -1025,6 +1025,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     struct rte_flow_action_raw_encap raw_encap = {0};
     uint32_t dst_tbl = 0;
     const uint32_t* recirc_id;
+    const struct ovs_action_push_tnl *tunnel;
     struct netdev_offload_set_action set_action;
 
     NL_ATTR_FOR_EACH_UNSAFE (a, left, nl_actions, actions_len) {
@@ -1086,7 +1087,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             break;
         }
         case OVS_ACTION_ATTR_TUNNEL_PUSH: {
-            const struct ovs_action_push_tnl *tunnel = nl_attr_get(a);
+            tunnel = nl_attr_get(a);
 
             raw_encap.data = (uint8_t *)tunnel->header;
             raw_encap.preserve = NULL;
