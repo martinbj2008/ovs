@@ -1027,6 +1027,9 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     const uint32_t* recirc_id;
     const struct ovs_action_push_tnl *tunnel;
     struct netdev_offload_set_action set_action;
+    struct rte_flow_action_of_push_vlan vlan_push = {0};
+    struct rte_flow_action_of_set_vlan_vid vlan_vid = {0};
+    const struct ovs_action_push_vlan *vlan = NULL;
 
     NL_ATTR_FOR_EACH_UNSAFE (a, left, nl_actions, actions_len) {
         int type = nl_attr_type(a);
@@ -1109,13 +1112,24 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                 continue;
             }
             break;
+        case OVS_ACTION_ATTR_PUSH_VLAN:
+            vlan = nl_attr_get(a);
+
+            vlan_push.ethertype = vlan->vlan_tpid;
+            vlan_vid.vlan_vid = vlan->vlan_tci;
+
+            /* RTE_FLOW_ACTION_TYPE_OF_SET_VLAN_PCP */
+            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_OF_PUSH_VLAN, &vlan_push);
+            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_OF_SET_VLAN_VID, &vlan_vid);
+            break;
+        case OVS_ACTION_ATTR_POP_VLAN:
+            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_OF_POP_VLAN, NULL);
+            break;
         case OVS_ACTION_ATTR_CLONE:
         case OVS_ACTION_ATTR_HASH:
         case OVS_ACTION_ATTR_PUSH_MPLS:
         case OVS_ACTION_ATTR_POP_MPLS:
         case OVS_ACTION_ATTR_CHECK_PKT_LEN:
-        case OVS_ACTION_ATTR_PUSH_VLAN:
-        case OVS_ACTION_ATTR_POP_VLAN:
         case OVS_ACTION_ATTR_UNSPEC:
         case OVS_ACTION_ATTR_USERSPACE:
         case OVS_ACTION_ATTR_SET:
