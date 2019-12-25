@@ -782,6 +782,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             struct rte_flow_item_sctp sctp;
             struct rte_flow_item_icmp icmp;
         };
+        struct rte_flow_item_vxlan vxlan;
     } spec, mask;
 
     memset(&spec, 0, sizeof spec);
@@ -790,6 +791,86 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     ret = netdev_offload_map_flow_priority(&flow_attr, info);
     if (ret)
         return ret;
+
+    /* vxlan pattern */
+    if (match->wc.masks.tunnel.ip_src ||
+        match->wc.masks.tunnel.ip_dst ||
+        match->wc.masks.tunnel.tun_id ||
+        match->wc.masks.tunnel.tp_src ||
+        match->wc.masks.tunnel.tp_dst) {
+
+        uint8_t proto_l4 = 0;
+
+        memset(&spec.ipv4, 0, sizeof spec.ipv4);
+        memset(&mask.ipv4, 0, sizeof mask.ipv4);
+
+        spec.ipv4.hdr.type_of_service = match->flow.tunnel.ip_tos;
+        spec.ipv4.hdr.time_to_live    = match->flow.tunnel.ip_ttl;
+        spec.ipv4.hdr.next_proto_id   = IPPROTO_UDP;
+        spec.ipv4.hdr.src_addr        = match->flow.tunnel.ip_src;
+        spec.ipv4.hdr.dst_addr        = match->flow.tunnel.ip_dst;
+
+        mask.ipv4.hdr.type_of_service = match->wc.masks.tunnel.ip_tos;
+        // mask.ipv4.hdr.time_to_live    = match->wc.masks.tunnel.ip_ttl;
+        mask.ipv4.hdr.time_to_live    = 0x00u;
+        mask.ipv4.hdr.next_proto_id   = 0xffu;
+        mask.ipv4.hdr.src_addr        = match->wc.masks.tunnel.ip_src;
+        mask.ipv4.hdr.dst_addr        = match->wc.masks.tunnel.ip_dst;
+
+        add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_IPV4,
+                         &spec.ipv4, &mask.ipv4);
+
+        /* Save proto for L4 protocol setup */
+        proto_l4 = spec.ipv4.hdr.next_proto_id &
+                   mask.ipv4.hdr.next_proto_id;
+
+        if (proto_l4 == IPPROTO_UDP) {
+            memset(&spec.udp, 0, sizeof spec.udp);
+            memset(&mask.udp, 0, sizeof mask.udp);
+            spec.udp.hdr.src_port = match->flow.tunnel.tp_src;
+            spec.udp.hdr.dst_port = match->flow.tunnel.tp_dst;
+
+            mask.udp.hdr.src_port = match->wc.masks.tunnel.tp_src;
+            mask.udp.hdr.dst_port = match->wc.masks.tunnel.tp_dst;
+
+            add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_UDP,
+                             &spec.udp, &mask.udp);
+
+            struct vni {
+                union  {
+                    uint32_t val;
+                    uint8_t  vni[4];
+                };
+            };
+
+            struct vni vni = {
+                .val = (uint32_t)(match->flow.tunnel.tun_id >> 32),
+            };
+
+            struct vni vni_m = {
+                .val = (uint32_t)(match->wc.masks.tunnel.tun_id >> 32),
+            };
+
+            /* VXLAN */
+            memset(&spec.vxlan, 0, sizeof spec.vxlan);
+            memset(&mask.vxlan, 0, sizeof mask.vxlan);
+
+            spec.vxlan.flags  = match->flow.tunnel.flags;
+            spec.vxlan.vni[0] = vni.vni[1];
+            spec.vxlan.vni[1] = vni.vni[2];
+            spec.vxlan.vni[2] = vni.vni[3];
+
+            mask.vxlan.vni[0] = vni_m.vni[1];
+            mask.vxlan.vni[1] = vni_m.vni[2];
+            mask.vxlan.vni[2] = vni_m.vni[3];
+
+            add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_VXLAN,
+                             &spec.vxlan, &mask.vxlan);
+
+        } else {
+            VLOG_ERR("Tunnel should be on UDP");
+        }
+    }
 
     /* Eth */
     if (!eth_addr_is_zero(match->wc.masks.dl_src) ||
@@ -1088,11 +1169,6 @@ netdev_offload_dpdk_validate_flow(const struct match *match)
 
     /* Create a wc-zeroed version of flow. */
     match_init(&match_zero_wc, &match->flow, &match->wc);
-
-    if (!is_all_zeros(&match_zero_wc.flow.tunnel,
-                      sizeof match_zero_wc.flow.tunnel)) {
-        goto err;
-    }
 
     if (masks->metadata || masks->skb_priority ||
         masks->pkt_mark || masks->dp_hash) {
