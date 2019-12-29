@@ -624,16 +624,16 @@ pat_packet(struct dp_packet *pkt, const struct conn *conn)
 
 #define TCPOPT_TOA_CIP      254
 #define TCPOPT_TOA_VIP      253
-#define TOA_OPT_SIZE    	8
+#define TOA_OPT_SIZE        8
 
 static void
-nat_packet(struct dp_packet *pkt, const struct conn *conn, bool related)
+nat_packet(struct dp_packet *pkt, struct conn *conn, bool related)
 {
     if (conn->nat_info->nat_action & NAT_ACTION_SRC) {
         pkt->md.ct_state |= CS_SRC_NAT;
         if (conn->key.dl_type == htons(ETH_TYPE_IP)) {
             struct ip_header *nh = dp_packet_l3(pkt);
-            if (conn->key.nw_proto == IPPROTO_TCP && nh->ip_proto == IPPROTO_TCP) {
+            if (!conn->toa_added && conn->key.nw_proto == IPPROTO_TCP && nh->ip_proto == IPPROTO_TCP) {
                 struct tcp_header *th = dp_packet_l4(pkt);
                 uint16_t tcp_flags = TCP_FLAGS(th->tcp_ctl);
                 uint16_t ip_tot_len;
@@ -642,8 +642,7 @@ nat_packet(struct dp_packet *pkt, const struct conn *conn, bool related)
                 ip_tot_len = ntohs(nh->ip_tot_len);
                 tcp_len = (uint8_t *)&th->tcp_ctl;
                 tcp_csum_len = (*tcp_len >> 4)*4;
-                //Now we set toa option to sync and ack packet without payload
-                //TODO: only set toa option to sync and first ack packet
+                //set toa option to sync and ack packet without payload
                 if (ip_tot_len == tcp_csum_len + IP_HEADER_LEN) {
                     if ((tcp_flags & TCP_SYN) == TCP_SYN || (tcp_flags & TCP_ACK) == TCP_ACK) {
                         //TODO: fastopen
@@ -670,6 +669,11 @@ nat_packet(struct dp_packet *pkt, const struct conn *conn, bool related)
                         *tcp_len += TOA_OPT_SIZE/4 << 4;
                         th->tcp_csum = recalc_csum16(th->tcp_csum, tcp_ctl, th->tcp_ctl);
                         th->tcp_csum = recalc_csum16(th->tcp_csum, htons(tcp_csum_len), htons(tcp_csum_len + TOA_OPT_SIZE));
+
+                        //only set toa option to sync and first ack packet
+                        if ((tcp_flags & TCP_ACK) == TCP_ACK) {
+                            conn->toa_added = true;
+                        }
                     }
                 }
             }

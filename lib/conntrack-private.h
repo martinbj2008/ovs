@@ -109,6 +109,8 @@ struct conn {
                         * control messages; true if reply direction. */
     bool cleaned; /* True if cleaned from expiry lists. */
 
+    bool toa_added; /* Trues if toa option has been added in first sync and ack packet. */
+
     /* Immutable data. */
     bool alg_related; /* True if alg data connection. */
     enum ct_conn_type conn_type;
