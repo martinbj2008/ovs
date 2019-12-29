@@ -1722,10 +1722,12 @@ dp_delete_meter(struct dp_netdev *dp, uint32_t meter_id)
     if (dp->meters[meter_id]) {
         if (dp->meters[meter_id]->offload) {
             struct netdev_offload_meter *nom;
-            nom = dp->meters[meter_id]->offload;
 
-            nom->netdev_offload_meter_cb(nom->data);
+            nom = dp->meters[meter_id]->offload;
+            nom->meter_ops->meter_destroy(nom->priv_data);
+
             free(nom);
+            dp->meters[meter_id]->offload = NULL;
         }
 
         free(dp->meters[meter_id]);
@@ -5923,7 +5925,18 @@ dpif_netdev_meter_set(struct dpif *dpif, ofproto_meter_id meter_id,
         }
     }
 
+    VLOG_INFO("SET METERID: %d\n", mid);
+
     meter_lock(dp, mid);
+    if (dp->meters[mid] && dp->meters[mid]->offload) {
+        struct netdev_offload_meter *nom;
+
+        nom = dp->meters[mid]->offload;
+        nom->meter_ops->meter_update(nom->priv_data, config);
+        meter->offload = nom;
+        dp->meters[mid]->offload = NULL;
+    }
+
     dp_delete_meter(dp, mid); /* Free existing meter, if any */
     dp->meters[mid] = meter;
     meter_unlock(dp, mid);

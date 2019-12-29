@@ -489,10 +489,12 @@ netdev_offload_dpdk_dump(struct flow_patterns *patterns,
 
 struct dpdk_meter_offload {
     uint32_t port_id;
+    uint32_t max_rate;
+    uint32_t mp_id;
     struct rte_flow_action_meter mc;
 };
 
-static void netdev_offload_dpdk_meter_destroy(void *data)
+static void dpdk_meter_destroy(void *data)
 {
     struct dpdk_meter_offload *dmo = data;
     struct rte_mtr_error error;
@@ -501,17 +503,80 @@ static void netdev_offload_dpdk_meter_destroy(void *data)
         rte_mtr_meter_profile_delete(dmo->port_id,
                                      dmo->mc.mtr_id,
                                      &error);
-
         rte_mtr_destroy(dmo->port_id,
                         dmo->mc.mtr_id,
                         &error);
-
         free(dmo);
     }
 }
 
+#define DPDK_METER_UPATE_UP 65536 
+
+static void dpdk_meter_update(void *priv_data, void *config)
+{
+    struct dpdk_meter_offload *dmo = priv_data;
+    struct rte_mtr_meter_profile mp;
+    struct rte_mtr_error mtr_error;
+    uint32_t mp_id, new_mp_id;
+    uint32_t max_rate;
+    uint32_t ret;
+
+    if (!priv_data || !config) {
+        return;
+    }
+    
+    max_rate = ofputil_meter_config_max_rate(config);
+    if (dmo->max_rate == max_rate) {
+        return;
+    }
+
+    memset(&mp, 0, sizeof(struct rte_mtr_meter_profile));
+    mp.alg = RTE_MTR_SRTCM_RFC2697;
+    mp.srtcm_rfc2697.cir = max_rate *1024 /8;
+    mp.srtcm_rfc2697.cbs = max_rate *1024 /8;
+    mp.srtcm_rfc2697.ebs = 0;
+
+    if (dmo->mp_id < DPDK_METER_UPATE_UP) {
+        new_mp_id = dmo->mp_id + DPDK_METER_UPATE_UP;
+    } else {
+        new_mp_id = dmo->mp_id - DPDK_METER_UPATE_UP;
+    }
+
+    ret = rte_mtr_meter_profile_add(dmo->port_id, new_mp_id,
+                                    &mp, &mtr_error);
+    if (ret) {
+        VLOG_ERR("rte_mtr_meter_profile_add fail: err_type: %d err_msg: %s\n",
+                 mtr_error.type, mtr_error.message);
+        return;
+    }
+
+    ret = rte_mtr_meter_profile_update(dmo->port_id, dmo->mc.mtr_id,
+                                       new_mp_id, &mtr_error);
+    if (ret) {
+        VLOG_ERR("rte_mtr_meter_profile_update fail: err_type: %d err_msg: %s\n",
+                 mtr_error.type, mtr_error.message);
+        mp_id = new_mp_id;
+        goto out;
+    }
+
+    mp_id = dmo->mp_id;
+    dmo->mp_id = new_mp_id;
+    dmo->max_rate = max_rate;
+out:
+    ret = rte_mtr_meter_profile_delete(dmo->port_id, mp_id, &mtr_error);
+    if (ret) {
+        VLOG_ERR("rte_mtr_meter_profile_update fail: err_type: %d err_msg: %s\n",
+                 mtr_error.type, mtr_error.message);
+    }
+}
+
+static struct netdev_offload_meter_api dpdk_meter_offload_api = {
+    .meter_destroy  = dpdk_meter_destroy,
+    .meter_update   = dpdk_meter_update,
+};
+
 static struct rte_flow_action_meter*
-netdev_offload_dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
+dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
 {
     uint32_t port_id = netdev_dpdk_get_portid(netdev);
     struct netdev_offload_meter *nom;
@@ -525,7 +590,7 @@ netdev_offload_dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint3
     int ret;
 
     meter_id.uint32 = mid;
-
+    
     if (dpif_meter_get_config(dpif, meter_id, &config)) {
         return NULL;
     }
@@ -533,14 +598,16 @@ netdev_offload_dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint3
     nom = xmalloc(sizeof *nom);
     dmo = xmalloc(sizeof *dmo);
 
-    nom->netdev_offload_meter_cb = netdev_offload_dpdk_meter_destroy;
-    nom->data = dmo;
-
-    dmo->mc.mtr_id = mid;
-    dmo->port_id = port_id;
+    nom->meter_ops = &dpdk_meter_offload_api;
+    nom->priv_data = dmo;
 
     memset(&mp, 0, sizeof(struct rte_mtr_meter_profile));
     max_rate = ofputil_meter_config_max_rate(&config);
+
+    dmo->mc.mtr_id = mid;
+    dmo->port_id = port_id;
+    dmo->max_rate = max_rate;
+    dmo->mp_id = mid;
 
     mp.alg = RTE_MTR_SRTCM_RFC2697;
     mp.srtcm_rfc2697.cir = max_rate *1024 /8; /* rate_max Kbps*/
@@ -567,7 +634,7 @@ netdev_offload_dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint3
     params.action[RTE_COLOR_YELLOW] = MTR_POLICER_ACTION_DROP;
     params.action[RTE_COLOR_RED]    = MTR_POLICER_ACTION_DROP;
 
-    ret = rte_mtr_create(dmo->port_id, dmo->mc.mtr_id, &params, 1, &mtr_error);
+    ret = rte_mtr_create(dmo->port_id, dmo->mc.mtr_id, &params, 0, &mtr_error);
     if (ret && ret != -EEXIST) {
         VLOG_ERR("rte_mtr_create fail: err_type: %d err_msg: %s, portid: %d\n",
                    mtr_error.type, mtr_error.message, netdev_dpdk_get_portid(netdev));
@@ -575,7 +642,7 @@ netdev_offload_dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint3
     }
 
     dpif_meter_set_offload(dpif, meter_id, nom);
-
+    
     free(config.bands);
     return &dmo->mc;
 
@@ -590,7 +657,7 @@ profile_err:
 }
 
 static struct rte_flow_action_meter *
-netdev_offload_dpdk_meter_update(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
+netdev_offload_dpdk_meter_conf(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
 {
     uint32_t port_id = netdev_dpdk_get_portid(netdev);
     struct netdev_offload_meter *nom = NULL;
@@ -607,10 +674,10 @@ netdev_offload_dpdk_meter_update(struct dpif *dpif, struct netdev *netdev, uint3
     }
 
     if (!nom) {
-        return netdev_offload_dpdk_meter_create(dpif, netdev, mid);
+        return dpdk_meter_create(dpif, netdev, mid);
     }
 
-    dmo = (struct dpdk_meter_offload *)nom->data;
+    dmo = (struct dpdk_meter_offload *)nom->priv_data;
     if (port_id != dmo->port_id) {
         VLOG_INFO("dpdk meter %d is used on %d, can't be used for : %d",
                   mid, dmo->port_id, port_id);
@@ -1063,7 +1130,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         }
         case OVS_ACTION_ATTR_METER: {
             struct rte_flow_action_meter *mc;
-            mc = netdev_offload_dpdk_meter_update(dpif, netdev, nl_attr_get_u32(a));
+            mc = netdev_offload_dpdk_meter_conf(dpif, netdev, nl_attr_get_u32(a));
             if (mc) {
                 VLOG_INFO("add flow action: RTE_FLOW_ACTION_TYPE_METER: %d", RTE_FLOW_ACTION_TYPE_METER);
                 add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_METER, mc);
