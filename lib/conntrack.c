@@ -2555,26 +2555,21 @@ conntrack_del_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *rs_pool)
     struct ct_rs_pool_t *existed_rs_pool, *next;
     LIST_FOR_EACH_SAFE(existed_rs_pool, next, node, &ct->rs_pools) {
         if (!strcmp(existed_rs_pool->pool_name, rs_pool->pool_name)) {
-            if (!rs_pool->count) {
-                ovs_list_remove(&existed_rs_pool->node);
-                free(existed_rs_pool);
-            } else {
-                for(int i = 0; i < rs_pool->count; i++) {
-                    for(int j = 0; j < existed_rs_pool->count; j++) {
-                        if(!memcmp(&rs_pool->rs[i], &existed_rs_pool->rs[j], sizeof(struct ct_rs_t))) {
-                            if (existed_rs_pool->count == 1) {
-                                // if the rs is the last one, delete rs pool list node directly
-                                ovs_list_remove(&existed_rs_pool->node);
-                                free(existed_rs_pool);
-                            } else {
-                                // delete rs in array and move the later rs ahead
-                                int k = j;
-                                for(; k < existed_rs_pool->count-1; k++) {
-                                    existed_rs_pool->rs[k] = existed_rs_pool->rs[k+1];
-                                }
-                                memset(&existed_rs_pool->rs[k], 0, sizeof existed_rs_pool->rs[k]);
-                                existed_rs_pool->count--;
+            for(int i = 0; i < rs_pool->count; i++) {
+                for(int j = 0; j < existed_rs_pool->count; j++) {
+                    if(!memcmp(&rs_pool->rs[i], &existed_rs_pool->rs[j], sizeof(struct ct_rs_t))) {
+                        if (existed_rs_pool->count == 1) {
+                            // if the rs is the last one, delete rs pool list node directly
+                            ovs_list_remove(&existed_rs_pool->node);
+                            free(existed_rs_pool);
+                        } else {
+                            // delete rs in array and move the later rs ahead
+                            int k = j;
+                            for(; k < existed_rs_pool->count-1; k++) {
+                                existed_rs_pool->rs[k] = existed_rs_pool->rs[k+1];
                             }
+                            memset(&existed_rs_pool->rs[k], 0, sizeof existed_rs_pool->rs[k]);
+                            existed_rs_pool->count--;
                         }
                     }
                 }
