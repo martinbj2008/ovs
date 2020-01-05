@@ -3781,12 +3781,29 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
         struct odputil_keybuf *keybuf = &thread->keybuf[i];
         struct dp_netdev_flow *netdev_flow = netdev_flows[i];
         struct dpif_flow *f = &flows[i];
+        struct netdev_flow_dump netdev_dump;
+        struct dpif_flow_stats stats;
         struct ofpbuf key, mask;
+        bool dump_offload;
 
         ofpbuf_use_stack(&key, keybuf, sizeof *keybuf);
         ofpbuf_use_stack(&mask, maskbuf, sizeof *maskbuf);
+
+        odp_port_t odp_port = netdev_flow->flow.in_port.odp_port;
+        netdev_dump.netdev = netdev_ports_get(odp_port,
+                                              thread_->dpif->dpif_class);
+
+        dump_offload = netdev_flow_dump_next(&netdev_dump, NULL, NULL, &stats, NULL,
+                                             CONST_CAST(ovs_u128 *, &netdev_flow->mega_ufid),
+                                             NULL, NULL);
+
         dp_netdev_flow_to_dpif_flow(netdev_flow, &key, &mask, f,
                                     dump->up.terse);
+        if (dump_offload) {
+            f->stats = stats;
+            f->attrs.offloaded = true;
+            f->attrs.dp_layer = "dpdk";
+        }
     }
 
     return n_flows;

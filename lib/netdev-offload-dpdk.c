@@ -1216,6 +1216,10 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         }
     }
 
+    struct rte_flow_action_count action_count;
+    action_count.shared = 0;
+    action_count.id = info->flow_mark;
+    add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_COUNT, &action_count);
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_END, NULL);
 
     netdev_offload_dpdk_dump(&patterns, &actions);
@@ -1367,6 +1371,50 @@ netdev_offload_dpdk_flow_del(struct netdev *netdev, const ovs_u128 *ufid,
     return netdev_offload_dpdk_destroy_flow(netdev, ufid, rte_flow);
 }
 
+static bool
+netdev_offload_dpdk_flow_dump_next(struct netdev_flow_dump *dump,
+                                   struct match *match OVS_UNUSED,
+                                   struct nlattr **actions OVS_UNUSED,
+                                   struct dpif_flow_stats *stats,
+                                   struct dpif_flow_attrs *attrs OVS_UNUSED,
+                                   ovs_u128 *ufid,
+                                   struct ofpbuf *rbuffer OVS_UNUSED,
+                                   struct ofpbuf *wbuffer OVS_UNUSED)
+{
+    struct rte_flow *rte_flow = ufid_to_rte_flow_find(ufid);
+
+    if (!rte_flow) {
+        return false;
+    }
+
+    struct rte_flow_query_count ethdev_count;
+    struct rte_flow_action action[2];
+    struct rte_flow_error error;
+
+    action[0].type = RTE_FLOW_ACTION_TYPE_COUNT;
+    action[1].type = RTE_FLOW_ACTION_TYPE_END;
+
+    ethdev_count.reset = 0;
+    ethdev_count.hits_set = 1;
+    ethdev_count.bytes_set = 1;
+
+    int ret = rte_flow_query(netdev_dpdk_get_portid(dump->netdev),
+                             rte_flow, action,
+                             &ethdev_count, &error);
+    if (ret) {
+        VLOG_INFO("rte_flow_query fail: error.type: %d, error.message: %s",
+                  error.type,
+                  error.message ? error.message : "(no stated reason)");
+
+        return false;
+    }
+
+    stats->n_packets = ethdev_count.hits;
+    stats->n_bytes = ethdev_count.bytes;
+    stats->used = time_msec(); 
+    return true;
+}
+
 static int
 netdev_offload_dpdk_init_flow_api(struct netdev *netdev)
 {
@@ -1378,4 +1426,7 @@ const struct netdev_flow_api netdev_offload_dpdk = {
     .flow_put = netdev_offload_dpdk_flow_put,
     .flow_del = netdev_offload_dpdk_flow_del,
     .init_flow_api = netdev_offload_dpdk_init_flow_api,
+    .flow_dump_create = NULL,
+    .flow_dump_destroy = NULL,
+    .flow_dump_next = netdev_offload_dpdk_flow_dump_next,
 };
