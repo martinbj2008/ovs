@@ -232,10 +232,12 @@ struct ct_rs_t {
     ovs_be16 port;
 };
 
+#define CT_POOL_MAX_RS_COUNT 32
+
 struct ct_rs_pool_t {
     uint16_t count;     /*rs number of this pool*/
     char pool_name[33];
-    struct ct_rs_t rs[10];
+    struct ct_rs_t rs[CT_POOL_MAX_RS_COUNT];
     struct ovs_list node;
     struct rculist rcu_node;
     struct ovs_mutex rs_lock;

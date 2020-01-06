@@ -817,6 +817,7 @@ enum ovs_ct_attr {
 };
 
 #define OVS_CT_ATTR_MAX (__OVS_CT_ATTR_MAX - 1)
+#define OVS_NAT_ATTR_MAX_RS_COUNT 32
 
 /*
  * struct ovs_action_push_eth - %OVS_ACTION_ATTR_PUSH_ETH action argument.

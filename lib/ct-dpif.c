@@ -817,6 +817,10 @@ ct_dpif_parse_rs_pool(struct ct_rs_pool_t *rs_pool, const char *s_) {
                 uint16_t count = 0;
                 uint16_t port = 0;
                 while(s < end) {
+                    if (count >= CT_POOL_MAX_RS_COUNT) {
+                        VLOG_WARN("rs count is out of range");
+                        return EINVAL;
+                    }
                     s += strspn(s, delimiters);
                     if(ovs_scan(s, IP_PORT_SCAN_FMT"%n", IP_PORT_SCAN_ARGS(&rs_pool->rs[count].ipv4, &port), &n)) {
                         rs_pool->rs[count].port = htons(port);

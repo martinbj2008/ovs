@@ -2539,7 +2539,12 @@ conntrack_add_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *rs_pool)
             if (!is_rs_existed) {
                 old_rs_pool->rs[old_rs_pool->count++] = rs_pool->rs[i];
             }
-            ovs_mutex_unlock(&old_rs_pool->rs_lock);
+            if (old_rs_pool->count > CT_POOL_MAX_RS_COUNT) {
+                ovs_mutex_unlock(&old_rs_pool->rs_lock);
+                return EINVAL;
+            } else {
+                ovs_mutex_unlock(&old_rs_pool->rs_lock);
+            }
         }
     } else {
         struct ct_rs_pool_t *new_rs_pool = xmalloc(sizeof(struct ct_rs_pool_t));

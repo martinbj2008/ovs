@@ -86,7 +86,7 @@ struct rs_t {
 
 struct nat_rs_pack_t {
     uint16_t count;
-    struct rs_t rs[10];
+    struct rs_t rs[OVS_NAT_ATTR_MAX_RS_COUNT];
 };
 
 struct nat_action_info_t {
