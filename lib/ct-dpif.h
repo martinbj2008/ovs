@@ -19,6 +19,8 @@
 
 #include "openvswitch/types.h"
 #include "packets.h"
+#include "openvswitch/thread.h"
+#include "rculist.h"
 
 union ct_dpif_inet_addr {
     ovs_be32 ip;
@@ -235,6 +237,8 @@ struct ct_rs_pool_t {
     char pool_name[33];
     struct ct_rs_t rs[10];
     struct ovs_list node;
+    struct rculist rcu_node;
+    struct ovs_mutex rs_lock;
 };
 
 int ct_dpif_dump_start(struct dpif *, struct ct_dpif_dump_state **,

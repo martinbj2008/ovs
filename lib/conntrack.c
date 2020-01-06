@@ -317,9 +317,7 @@ conntrack_init(void)
     latch_init(&ct->clean_thread_exit);
     ct->clean_thread = ovs_thread_create("ct_clean", clean_thread_main, ct);
     ct->ipf = ipf_init();
-
-    ct->pool_count = 0;
-    ovs_list_init(&ct->rs_pools);
+    rculist_init(&ct->rs_pools);
 
     return ct;
 }
@@ -507,7 +505,7 @@ static inline struct ct_rs_pool_t*
 get_ct_rs_pool(struct conntrack *ct, char *pool_name)
 {
     struct ct_rs_pool_t *rs_pool;
-    LIST_FOR_EACH(rs_pool, node, &ct->rs_pools) {
+    RCULIST_FOR_EACH(rs_pool, rcu_node, &ct->rs_pools) {
         if (!strcmp(rs_pool->pool_name, pool_name)) {
             return rs_pool;
         }
@@ -2178,9 +2176,12 @@ nat_select_range_tuple(struct conntrack *ct, const struct conn *conn,
         } else if (conn->nat_info->nat_action & NAT_ACTION_POOL) {
             struct ct_rs_pool_t *rs_pool = get_ct_rs_pool(ct, conn->nat_info->pool_name);
             if(rs_pool) {
+                //TODO: add specific algorithm
+                ovs_mutex_lock(&rs_pool->rs_lock);
                 int rs_index = hash % rs_pool->count;
                 nat_conn->rev_key.src.addr.ipv4 = rs_pool->rs[rs_index].ipv4;
                 nat_conn->rev_key.src.port = rs_pool->rs[rs_index].port;
+                ovs_mutex_unlock(&rs_pool->rs_lock);
             } else {
                 VLOG_WARN("rs pool: %s is not found", conn->nat_info->pool_name);
             }
@@ -2528,23 +2529,23 @@ conntrack_add_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *rs_pool)
     if (old_rs_pool) {
         for(int i = 0; i < rs_pool->count; i++) {
             bool is_rs_existed = false;
+            ovs_mutex_lock(&old_rs_pool->rs_lock);
             for(int j = 0; j < old_rs_pool->count; j++) {
                 if(!memcmp(&rs_pool->rs[i], &old_rs_pool->rs[j], sizeof(struct ct_rs_t))) {
                     is_rs_existed = true;
                     break;
                 }
             }
-            if (is_rs_existed) {
-                continue;
-            } else {
+            if (!is_rs_existed) {
                 old_rs_pool->rs[old_rs_pool->count++] = rs_pool->rs[i];
             }
+            ovs_mutex_unlock(&old_rs_pool->rs_lock);
         }
     } else {
         struct ct_rs_pool_t *new_rs_pool = xmalloc(sizeof(struct ct_rs_pool_t));
         memcpy(new_rs_pool, rs_pool, sizeof *rs_pool);
-        ovs_list_push_front(&ct->rs_pools, &new_rs_pool->node);
-        ct->pool_count++;
+        ovs_mutex_init_adaptive(&new_rs_pool->rs_lock);
+        rculist_push_front(&ct->rs_pools, &new_rs_pool->rcu_node);
     }
     return 0;
 }
@@ -2552,29 +2553,30 @@ conntrack_add_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *rs_pool)
 int
 conntrack_del_rs_pool(struct conntrack *ct, struct ct_rs_pool_t *rs_pool)
 {
-    struct ct_rs_pool_t *existed_rs_pool, *next;
-    LIST_FOR_EACH_SAFE(existed_rs_pool, next, node, &ct->rs_pools) {
-        if (!strcmp(existed_rs_pool->pool_name, rs_pool->pool_name)) {
-            for(int i = 0; i < rs_pool->count; i++) {
-                for(int j = 0; j < existed_rs_pool->count; j++) {
-                    if(!memcmp(&rs_pool->rs[i], &existed_rs_pool->rs[j], sizeof(struct ct_rs_t))) {
-                        if (existed_rs_pool->count == 1) {
-                            // if the rs is the last one, delete rs pool list node directly
-                            ovs_list_remove(&existed_rs_pool->node);
-                            free(existed_rs_pool);
-                        } else {
-                            // delete rs in array and move the later rs ahead
-                            int k = j;
-                            for(; k < existed_rs_pool->count-1; k++) {
-                                existed_rs_pool->rs[k] = existed_rs_pool->rs[k+1];
-                            }
-                            memset(&existed_rs_pool->rs[k], 0, sizeof existed_rs_pool->rs[k]);
-                            existed_rs_pool->count--;
-                        }
+    struct ct_rs_pool_t *existed_rs_pool = get_ct_rs_pool(ct, rs_pool->pool_name);
+    if (existed_rs_pool) {
+        for(int i = 0; i < rs_pool->count; i++) {
+            ovs_mutex_lock(&existed_rs_pool->rs_lock);
+            for(int j = 0; j < existed_rs_pool->count; j++) {
+                if(!memcmp(&rs_pool->rs[i], &existed_rs_pool->rs[j], sizeof(struct ct_rs_t))) {
+                    // delete rs in array and move the later rs ahead
+                    int k = j;
+                    for(; k < existed_rs_pool->count-1; k++) {
+                        existed_rs_pool->rs[k] = existed_rs_pool->rs[k+1];
                     }
+                    memset(&existed_rs_pool->rs[k], 0, sizeof existed_rs_pool->rs[k]);
+                    existed_rs_pool->count--;
                 }
             }
-            break;
+            if(existed_rs_pool->count == 0) {
+                // if the rs is the last one, delete rs pool list node directly
+                ovs_mutex_unlock(&existed_rs_pool->rs_lock);
+                ovs_mutex_destroy(&existed_rs_pool->rs_lock);
+                rculist_remove(&existed_rs_pool->rcu_node);
+                ovsrcu_postpone(free, existed_rs_pool);
+            } else {
+                ovs_mutex_unlock(&existed_rs_pool->rs_lock);
+            }
         }
     }
     return 0;
@@ -2584,9 +2586,11 @@ int
 conntrack_dump_rs_pool(struct conntrack *ct, struct ovs_list *rs_pools)
 {
     const struct ct_rs_pool_t *__rs_pool = NULL;
-    LIST_FOR_EACH(__rs_pool, node, &ct->rs_pools) {
+    RCULIST_FOR_EACH(__rs_pool, rcu_node, &ct->rs_pools) {
         struct ct_rs_pool_t *rs_pool = xmalloc(sizeof *__rs_pool);
+        ovs_mutex_lock(&__rs_pool->rs_lock);
         memcpy(rs_pool, __rs_pool, sizeof *__rs_pool);
+        ovs_mutex_unlock(&__rs_pool->rs_lock);
         ovs_list_push_front(rs_pools, &rs_pool->node);
     }
     return 0;

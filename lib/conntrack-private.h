@@ -31,6 +31,7 @@
 #include "packets.h"
 #include "unaligned.h"
 #include "dp-packet.h"
+#include "rculist.h"
 
 struct ct_endpoint {
     union ct_addr addr;
@@ -177,8 +178,7 @@ struct conntrack {
     struct ipf *ipf;
 
     /*rs pool for full nat*/
-    uint16_t pool_count;
-    struct ovs_list rs_pools;
+    struct rculist rs_pools;
 };
 
 /* Lock acquisition order:
