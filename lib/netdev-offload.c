@@ -59,7 +59,7 @@ VLOG_DEFINE_THIS_MODULE(netdev_offload);
 
 
 static bool netdev_flow_api_enabled = false;
-
+netdev_port_add_del_hook_func netdev_port_hook_func = NULL;
 /* Protects 'netdev_flow_apis'.  */
 static struct ovs_mutex netdev_flow_api_provider_mutex = OVS_MUTEX_INITIALIZER;
 
@@ -550,7 +550,9 @@ netdev_ports_insert(struct netdev *netdev, const struct dpif_class *dpif_class,
     ovs_mutex_unlock(&netdev_hmap_mutex);
 
     netdev_init_flow_api(netdev);
-
+    if (netdev_port_hook_func) {
+        netdev_port_hook_func(PORT_OP_ADD, netdev, dpif_port->port_no);
+    }
     return 0;
 }
 
@@ -571,6 +573,37 @@ netdev_ports_get(odp_port_t port_no, const struct dpif_class *dpif_class)
     return ret;
 }
 
+static struct port_to_netdev_data *
+netdev_ports_lookup_by_name(char *name, const struct dpif_class *dpif_class)
+    OVS_REQUIRES(netdev_hmap_mutex)
+{
+    struct port_to_netdev_data *data;
+
+    HMAP_FOR_EACH (data, portno_node, &port_to_netdev) {
+        if (data->dpif_class == dpif_class
+            && !strcmp((const char *)data->dpif_port.name, (const char*)name)) {
+            return data;
+        }
+    }
+    return NULL;
+}
+
+struct netdev *
+netdev_ports_get_by_name(char *name, const struct dpif_class *dpif_class)
+{
+    struct port_to_netdev_data *data;
+    struct netdev *ret = NULL;
+
+    ovs_mutex_lock(&netdev_hmap_mutex);
+    data = netdev_ports_lookup_by_name(name, dpif_class);
+    if (data) {
+        ret = netdev_ref(data->netdev);
+    }
+    ovs_mutex_unlock(&netdev_hmap_mutex);
+
+    return ret;
+}
+
 int
 netdev_ports_remove(odp_port_t port_no, const struct dpif_class *dpif_class)
 {
@@ -581,6 +614,9 @@ netdev_ports_remove(odp_port_t port_no, const struct dpif_class *dpif_class)
 
     data = netdev_ports_lookup(port_no, dpif_class);
     if (data) {
+        if (netdev_port_hook_func) {
+            netdev_port_hook_func(PORT_OP_DEL, data->netdev, data->dpif_port.port_no);
+        }
         dpif_port_destroy(&data->dpif_port);
         netdev_close(data->netdev); /* unref and possibly close */
         hmap_remove(&port_to_netdev, &data->portno_node);

@@ -50,6 +50,83 @@ typedef enum {
 #define RECIRC_ID_SPEC_PATTERN 0xFF000000
 #define IS_SPEC_RECIRC_ID(id) ((id & RECIRC_ID_SPEC_PATTERN) == RECIRC_ID_SPEC_PATTERN)
 
+bool soft_hard_compatible_flag = false;
+enum {
+    UPLINK=0,
+    UP_TO_DOWN,
+    UP_TO_VXLAN,
+    DOWN_TO_UP,
+    DOWNLINK,
+    VXLAN_OFFLOAD,
+    VXLAN_SOFT,
+    OFFLOAD_PORT_MAX
+};
+
+#define MAX_VXLAN_NUM 2
+struct vxlan_host_ip_map {
+    ovs_be32  host_ip;
+    odp_port_t port_id;
+};
+struct vxlan_host_ip_map vxlan_host_map[MAX_VXLAN_NUM] = {
+    [0] = {
+        .host_ip = 0,
+        .port_id = 0,
+    },
+    [1] = {
+        .host_ip = 0,
+        .port_id = 0,
+    }
+};
+
+struct output_port_map {
+    char * name;
+    odp_port_t port_id;
+    struct netdev *pdev; //record for config netdev lookup odp_port_t id
+};
+
+struct output_port_map port_map[] = {
+    [UPLINK]={
+        .name="uplink",
+        .port_id = 0,
+        .pdev = NULL,
+    },
+    [DOWNLINK]={
+        .name="downlink",
+        .port_id = 0,
+        .pdev=NULL,
+    },
+    [UP_TO_DOWN]={
+        .name="up-to-down",
+        .port_id = 0,
+        .pdev=NULL,
+    },
+    [DOWN_TO_UP]={
+        .name="down-to-up",
+        .port_id = 0,
+        .pdev=NULL,
+    },
+    [VXLAN_OFFLOAD]={
+        .name="vxlan-offload",
+        .port_id = 0,
+        .pdev=NULL,
+    },
+    [UP_TO_VXLAN]={
+        .name="up-to-vxlan-off",
+        .port_id = 0,
+        .pdev=NULL,
+    },
+    [VXLAN_SOFT]={
+        .name="vxlan0",
+        .port_id = 0,
+        .pdev=NULL,
+    },
+};
+
+#define get_odp_port_id(enum_id) ((enum_id >= OFFLOAD_PORT_MAX) ? port_map[UPLINK].port_id : port_map[enum_id].port_id)
+struct output_port_map* output_no_vxlan_encap_map[OFFLOAD_PORT_MAX][OFFLOAD_PORT_MAX];
+struct output_port_map* output_vxlan_encap_map[OFFLOAD_PORT_MAX][OFFLOAD_PORT_MAX];
+netdev_port_add_del_hook_func netdev_port_hook_func;
+
 /* Thread-safety
  * =============
  *
@@ -687,6 +764,169 @@ netdev_offload_dpdk_meter_conf(struct dpif *dpif, struct netdev *netdev, uint32_
     return &dmo->mc;
 }
 
+static void
+netdev_offload_output_port_map_init(void)
+{
+    memset(output_no_vxlan_encap_map, 0, sizeof(output_no_vxlan_encap_map));
+    memset(output_vxlan_encap_map, 0, sizeof(output_vxlan_encap_map));
+    output_no_vxlan_encap_map[UPLINK][DOWNLINK]=&port_map[UP_TO_DOWN];
+    output_no_vxlan_encap_map[DOWNLINK][UPLINK]=&port_map[DOWN_TO_UP];
+    output_no_vxlan_encap_map[DOWNLINK][DOWNLINK]=&port_map[DOWNLINK];
+    output_no_vxlan_encap_map[UPLINK][UPLINK]=&port_map[UPLINK];
+    output_vxlan_encap_map[VXLAN_OFFLOAD][UPLINK]=&port_map[DOWN_TO_UP];
+    output_vxlan_encap_map[VXLAN_OFFLOAD][DOWNLINK]=&port_map[DOWNLINK];
+    output_vxlan_encap_map[UPLINK][UPLINK]=&port_map[UP_TO_VXLAN]; //vxlan recirc
+    output_vxlan_encap_map[DOWNLINK][DOWNLINK]=&port_map[VXLAN_OFFLOAD]; //vxlan recirc
+}
+
+static int
+netdev_offload_get_enum_by_odp_port(odp_port_t id)
+{
+    int i = 0;
+
+    for (i = UPLINK; i < OFFLOAD_PORT_MAX; i++) {
+        if (port_map[i].port_id == id) {
+            return i;
+        }
+    }
+
+    return i;
+}
+
+
+static odp_port_t
+netdev_offload_get_odp_port_by_netdev(struct netdev *netdev)
+{
+    int i = 0;
+
+    VLOG_INFO("#######netdev: %p", netdev);
+    for (i = UPLINK; i < OFFLOAD_PORT_MAX; i++) {
+        if (port_map[i].pdev == netdev) {
+            return port_map[i].port_id;
+        }
+    }
+
+    return 0;
+}
+
+static odp_port_t
+netdev_offload_get_final_output_port_id(odp_port_t cfg_port_id, odp_port_t out_id, bool is_vxlan_encap)
+{
+    int sid = 0, did = 0;
+    struct output_port_map *pport = NULL;
+
+    sid = netdev_offload_get_enum_by_odp_port(cfg_port_id);
+    did = netdev_offload_get_enum_by_odp_port(out_id);
+    if (sid == OFFLOAD_PORT_MAX || did == OFFLOAD_PORT_MAX) {
+        goto error;
+    }
+
+    if (is_vxlan_encap) {
+        pport = output_vxlan_encap_map[sid][did];
+        if (pport) {
+            VLOG_INFO("Get vxlan encap output port %s", pport->name);
+            return pport->port_id;
+        } else {
+            goto error;
+        }
+    }
+
+    pport = output_no_vxlan_encap_map[sid][did];
+    if (pport) {
+        VLOG_INFO("Get normal output port %s", pport->name);
+        return pport->port_id;
+    }
+
+error:
+    VLOG_ERR("Get offload final output port error!");
+    return 0; //error
+}
+
+static void
+netdev_offload_vxlan_host_store(ovs_be32 host_ip, odp_port_t id)
+{
+    int i = 0;
+
+    for (i = 0; i < MAX_VXLAN_NUM; i++) {
+        if (host_ip == vxlan_host_map[i].host_ip) {
+            vxlan_host_map[i].port_id = id;
+            break;
+        }
+
+        if (vxlan_host_map[i].host_ip == 0) {
+            vxlan_host_map[i].host_ip = host_ip;
+            vxlan_host_map[i].port_id = id;
+            VLOG_INFO("%s, %d, i=%d, host_ip: 0x%x", __FUNCTION__, __LINE__, i, host_ip);
+            break;
+        }
+   }
+
+   return;
+}
+
+static odp_port_t
+netdev_offload_get_vxlan_pop_pf_id(ovs_be32 host_ip)
+{
+    int i = 0;
+
+    for (i = 0; i < MAX_VXLAN_NUM; i++) {
+        if (vxlan_host_map[i].host_ip == host_ip)
+            return vxlan_host_map[i].port_id;
+    }
+
+    return -1;
+}
+
+static void
+netdev_offload_port_add_del_hook(int op, struct netdev* netdev, odp_port_t id)
+{
+    int i = 0;
+
+    VLOG_INFO("*******OP: %d, netdev: %p, name: %s, id=%d", op, netdev, netdev->name, id);
+    for (i = UPLINK; i < OFFLOAD_PORT_MAX; i++) {
+        if (!strcmp(netdev->name, port_map[i].name)) {
+            if (op == PORT_OP_ADD && port_map[i].port_id != id) {
+                port_map[i].port_id = id;
+                port_map[i].pdev = netdev;
+            }
+
+            if (op == PORT_OP_DEL) {
+                port_map[i].pdev = NULL;
+                port_map[i].port_id = 0;
+            }
+        }
+    }
+
+    return;
+}
+
+static int
+netdev_offload_get_dpdk_index_by_odp_port(odp_port_t cfg_port, odp_port_t id, const struct dpif_class *dpif_class, bool is_vxlan_encap)
+{
+    odp_port_t final_port = 0;
+    int dpdk_port;
+
+    final_port=netdev_offload_get_final_output_port_id(cfg_port, id, is_vxlan_encap);
+    if (!final_port) {
+       final_port = id;
+    }
+
+    struct netdev *dst_netdev = netdev_ports_get(final_port, dpif_class);
+    if (!dst_netdev) {
+        VLOG_ERR("when offload output, can't find output port\n");
+        return -1;
+    }
+
+    if (strncmp(dst_netdev->netdev_class->type, "dpdk", 4) != 0) {
+        VLOG_ERR("can't offload output port to non-dpdk port %s\n", dst_netdev->name);
+        return -1;
+    }
+
+    VLOG_INFO("### get port name %s ###", dst_netdev->name);
+    dpdk_port = netdev_dpdk_get_portid(dst_netdev);
+    return dpdk_port;
+}
+
 static int
 netdev_offload_map_flow_priority(struct rte_flow_attr * flow_attr, struct offload_info * info)
 {
@@ -849,8 +1089,17 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             struct rte_flow_item_sctp sctp;
             struct rte_flow_item_icmp icmp;
         };
+        union {
+            struct rte_flow_item_tcp  outer_tcp;
+            struct rte_flow_item_udp  outer_udp;
+            struct rte_flow_item_sctp outer_sctp;
+            struct rte_flow_item_icmp outer_icmp;
+        };
+        struct rte_flow_item_ipv4 outer_ipv4;
         struct rte_flow_item_vxlan vxlan;
     } spec, mask;
+    bool vxlan_match_flag = false, vxlan_encap_flag=false;
+    odp_port_t cfg_port = 0;
 
     memset(&spec, 0, sizeof spec);
     memset(&mask, 0, sizeof mask);
@@ -868,40 +1117,40 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
 
         uint8_t proto_l4 = 0;
 
-        memset(&spec.ipv4, 0, sizeof spec.ipv4);
-        memset(&mask.ipv4, 0, sizeof mask.ipv4);
+        memset(&spec.outer_ipv4, 0, sizeof spec.ipv4);
+        memset(&mask.outer_ipv4, 0, sizeof mask.ipv4);
 
-        spec.ipv4.hdr.type_of_service = match->flow.tunnel.ip_tos;
-        spec.ipv4.hdr.time_to_live    = match->flow.tunnel.ip_ttl;
-        spec.ipv4.hdr.next_proto_id   = IPPROTO_UDP;
-        spec.ipv4.hdr.src_addr        = match->flow.tunnel.ip_src;
-        spec.ipv4.hdr.dst_addr        = match->flow.tunnel.ip_dst;
+        spec.outer_ipv4.hdr.type_of_service = match->flow.tunnel.ip_tos;
+        spec.outer_ipv4.hdr.time_to_live    = match->flow.tunnel.ip_ttl;
+        spec.outer_ipv4.hdr.next_proto_id   = IPPROTO_UDP;
+        spec.outer_ipv4.hdr.src_addr        = match->flow.tunnel.ip_src;
+        spec.outer_ipv4.hdr.dst_addr        = match->flow.tunnel.ip_dst;
 
         mask.ipv4.hdr.type_of_service = match->wc.masks.tunnel.ip_tos;
         // mask.ipv4.hdr.time_to_live    = match->wc.masks.tunnel.ip_ttl;
-        mask.ipv4.hdr.time_to_live    = 0x00u;
-        mask.ipv4.hdr.next_proto_id   = 0xffu;
-        mask.ipv4.hdr.src_addr        = match->wc.masks.tunnel.ip_src;
-        mask.ipv4.hdr.dst_addr        = match->wc.masks.tunnel.ip_dst;
+        mask.outer_ipv4.hdr.time_to_live    = 0x00u;
+        mask.outer_ipv4.hdr.next_proto_id   = 0xffu;
+        mask.outer_ipv4.hdr.src_addr        = match->wc.masks.tunnel.ip_src;
+        mask.outer_ipv4.hdr.dst_addr        = match->wc.masks.tunnel.ip_dst;
 
         add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_IPV4,
-                         &spec.ipv4, &mask.ipv4);
+                         &spec.outer_ipv4, &mask.outer_ipv4);
 
         /* Save proto for L4 protocol setup */
-        proto_l4 = spec.ipv4.hdr.next_proto_id &
-                   mask.ipv4.hdr.next_proto_id;
+        proto_l4 = spec.outer_ipv4.hdr.next_proto_id &
+                   mask.outer_ipv4.hdr.next_proto_id;
 
         if (proto_l4 == IPPROTO_UDP) {
-            memset(&spec.udp, 0, sizeof spec.udp);
-            memset(&mask.udp, 0, sizeof mask.udp);
-            spec.udp.hdr.src_port = match->flow.tunnel.tp_src;
-            spec.udp.hdr.dst_port = match->flow.tunnel.tp_dst;
+            memset(&spec.outer_udp, 0, sizeof spec.udp);
+            memset(&mask.outer_udp, 0, sizeof mask.udp);
+            spec.outer_udp.hdr.src_port = match->flow.tunnel.tp_src;
+            spec.outer_udp.hdr.dst_port = match->flow.tunnel.tp_dst;
 
-            mask.udp.hdr.src_port = match->wc.masks.tunnel.tp_src;
-            mask.udp.hdr.dst_port = match->wc.masks.tunnel.tp_dst;
+            mask.outer_udp.hdr.src_port = match->wc.masks.tunnel.tp_src;
+            mask.outer_udp.hdr.dst_port = match->wc.masks.tunnel.tp_dst;
 
             add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_UDP,
-                             &spec.udp, &mask.udp);
+                             &spec.outer_udp, &mask.outer_udp);
 
             struct vni {
                 union  {
@@ -934,6 +1183,20 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_VXLAN,
                              &spec.vxlan, &mask.vxlan);
 
+            vxlan_match_flag = true;
+            cfg_port = netdev_offload_get_vxlan_pop_pf_id(match->flow.tunnel.ip_dst);
+            if (!cfg_port) {
+                VLOG_ERR("Can not get vxlan pop cfg port id, dst ip: 0x%x", match->flow.tunnel.ip_dst);
+            }
+
+            int port_enum;
+            port_enum = netdev_offload_get_enum_by_odp_port(cfg_port);
+            if (port_enum == OFFLOAD_PORT_MAX) {
+                VLOG_ERR("Can not get offload port enum, port id: %d", cfg_port);
+            } else {
+                VLOG_INFO("match vxlan, set config port to %s", port_map[port_enum].name);
+                netdev = port_map[port_enum].pdev;
+            }
         } else {
             VLOG_ERR("Tunnel should be on UDP");
         }
@@ -1090,13 +1353,18 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     int out_put_action_cnt = 0;
     struct rte_flow_action_port_id port_id;
     struct rte_flow_action_raw_encap raw_encap = {0};
-    uint32_t dst_tbl = 0;
     const uint32_t* recirc_id;
     const struct ovs_action_push_tnl *tunnel;
     struct netdev_offload_set_action set_action;
     struct rte_flow_action_of_push_vlan vlan_push = {0};
     struct rte_flow_action_of_set_vlan_vid vlan_vid = {0};
     const struct ovs_action_push_vlan *vlan = NULL;
+    int dpdk_port_id = 0;
+
+    if (vxlan_match_flag) {
+        VLOG_INFO("### add vxlan decap action ###");
+        add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
+    }
 
     NL_ATTR_FOR_EACH_UNSAFE (a, left, nl_actions, actions_len) {
         int type = nl_attr_type(a);
@@ -1109,19 +1377,18 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             }
 
             odp_port_t odp_port = nl_attr_get_odp_port(a);
+            cfg_port = netdev_offload_get_odp_port_by_netdev(netdev);
+            if (!cfg_port) {
+                VLOG_ERR("Get config port odp port id failed, netdev name: %s", netdev->name);
+            }
 
-            struct netdev *dst_netdev = netdev_ports_get(odp_port, info->dpif_class);
-            if (!dst_netdev) {
-                VLOG_INFO("when offload output, can't find output port\n");
+            dpdk_port_id = netdev_offload_get_dpdk_index_by_odp_port(cfg_port, odp_port, info->dpif_class, vxlan_encap_flag);
+            if (dpdk_port_id == -1) {
+                VLOG_ERR("Get dpdk port index error, cfg_port: %d", cfg_port);
                 continue;
             }
 
-            if (strncmp(dst_netdev->netdev_class->type, "dpdk", 4) != 0) {
-                VLOG_INFO("can't offload output port to non-dpdk port. dp port id: %d\n", odp_port);
-                continue;
-            }
-
-            port_id.id = netdev_dpdk_get_portid(dst_netdev);
+            port_id.id = dpdk_port_id;
             port_id.original = 0;
             add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_PORT_ID, &port_id);
 
@@ -1140,20 +1407,36 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             break;
         }
         case OVS_ACTION_ATTR_RECIRC: {
-            RECIRC_TYPE recirc_type = OFFLOAD_RECIRC_UNKOWN;
+            VLOG_INFO("### recirc action ###");
             recirc_id = nl_attr_get(a);
             if (recirc_id == NULL || !IS_SPEC_RECIRC_ID(*recirc_id)) {
                 VLOG_INFO("Unsupported this recirc id action: %d", ((recirc_id==NULL) ? -1: *recirc_id));
                 continue;
             }
-            recirc_type = GET_RECIRC_TYPE_BY_ID(*recirc_id);
-            ret = netdev_offload_jump_group_action(&flow_attr, recirc_type, &dst_tbl);
-            if (ret) {
-                VLOG_INFO("Get recirc type by id failed! id=%d", *recirc_id);
+
+            if (out_put_action_cnt) {
+                VLOG_INFO("MLX5 NIC can only one fate actions in a flow, offload fail\n");
+                ret = -1;
+                goto out;
+            }
+
+            cfg_port = netdev_offload_get_odp_port_by_netdev(netdev);
+            if (!cfg_port) {
+                VLOG_ERR("Get config port odp port id failed, netdev name: %s", netdev->name);
                 continue;
             }
 
-            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_JUMP, &dst_tbl);
+            dpdk_port_id = netdev_offload_get_dpdk_index_by_odp_port(cfg_port, cfg_port, info->dpif_class, true);
+            if (dpdk_port_id == -1) {
+                VLOG_ERR("Get dpdk port index error, cfg_port: %d", cfg_port);
+                continue;
+            }
+
+            VLOG_INFO("### recirc action output port: %d###", dpdk_port_id);
+            port_id.id = dpdk_port_id;
+            port_id.original = 0;
+            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_PORT_ID, &port_id);
+            out_put_action_cnt ++;
             break;
         }
         case OVS_ACTION_ATTR_TUNNEL_PUSH: {
@@ -1162,17 +1445,25 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             raw_encap.data = (uint8_t *)tunnel->header;
             raw_encap.preserve = NULL;
             raw_encap.size = tunnel->header_len;
-            if (netdev_offload_is_vxlan_encap_split(match)) {
-                flow_attr.group = OFFLOAD_TABLE_ID_VXLAN;
-            }
 
+            vxlan_encap_flag = true;                  //this flag will be used for normal output
+            if (port_map[VXLAN_OFFLOAD].pdev) {
+                netdev = port_map[VXLAN_OFFLOAD].pdev;  //config port set to vxlan-offload port
+            }
             add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_RAW_ENCAP, &raw_encap);
             break;
         }
         case OVS_ACTION_ATTR_TUNNEL_POP:
-            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
+            cfg_port=netdev_offload_get_odp_port_by_netdev(netdev);
+            if (!cfg_port) {
+                VLOG_ERR("Get config port odp port id failed, netdev name: %s", netdev->name);
+                continue;
+            }
+            netdev_offload_vxlan_host_store(match->flow.nw_dst, cfg_port);
+            //add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
             break;
         case OVS_ACTION_ATTR_SET_MASKED:
+            VLOG_INFO("### set action ###");
             ret = netdev_offload_set_action(nl_attr_get(a), &actions, &set_action);
             if (ret) {
                 VLOG_INFO("Set Action offload return error  %d", ret);
@@ -1418,6 +1709,10 @@ netdev_offload_dpdk_flow_dump_next(struct netdev_flow_dump *dump,
 static int
 netdev_offload_dpdk_init_flow_api(struct netdev *netdev)
 {
+    if (!netdev_port_hook_func) {
+        netdev_offload_output_port_map_init();
+        netdev_port_hook_func = netdev_offload_port_add_del_hook;
+    }
     return netdev_dpdk_flow_api_supported(netdev) ? 0 : EOPNOTSUPP;
 }
 
