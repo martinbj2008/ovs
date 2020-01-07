@@ -106,6 +106,7 @@ struct dpif_port;
 int netdev_ports_insert(struct netdev *, const struct dpif_class *,
                         struct dpif_port *);
 struct netdev *netdev_ports_get(odp_port_t port, const struct dpif_class *);
+struct netdev *netdev_ports_get_by_name(char *name, const struct dpif_class *);
 int netdev_ports_remove(odp_port_t port, const struct dpif_class *);
 odp_port_t netdev_ifindex_to_odp_port(int ifindex);
 
@@ -121,6 +122,12 @@ int netdev_ports_flow_get(const struct dpif_class *, struct match *match,
                           struct dpif_flow_stats *stats,
                           struct dpif_flow_attrs *attrs,
                           struct ofpbuf *buf);
+
+enum {
+    PORT_OP_ADD = 0,
+    PORT_OP_DEL,
+};
+typedef void (*netdev_port_add_del_hook_func)(int, struct netdev*, odp_port_t);
 
 #ifdef  __cplusplus
 }

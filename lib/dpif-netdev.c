@@ -1145,7 +1145,7 @@ dpif_netdev_set_max_flow(struct unixctl_conn *conn,
     netdev_max_flows = max_flows;
     ds_put_format(&ds, "set netdev_max_flows to %u\n", netdev_max_flows);
     unixctl_command_reply(conn, ds_cstr(&ds));
-    
+
     ds_destroy(&ds);
 }
 
@@ -2087,6 +2087,21 @@ get_port_by_name(struct dp_netdev *dp,
     return ENODEV;
 }
 
+static struct dp_netdev_port *
+get_dpdk_port_by_type(struct dp_netdev *dp)
+    OVS_REQUIRES(dp->port_mutex)
+{
+    struct dp_netdev_port *port;
+
+    HMAP_FOR_EACH (port, node, &dp->ports) {
+        if (!strncmp(port->type, "dpdk", 4)) {
+            return port;
+        }
+    }
+
+    return NULL;
+}
+
 /* Returns 'true' if there is a port with pmd netdev. */
 static bool
 has_pmd_port(struct dp_netdev *dp)
@@ -2470,6 +2485,7 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
     struct offload_info info;
     uint32_t mark;
     int ret;
+    struct dp_netdev_port *port_new;
 
     if (flow->dead) {
         return -1;
@@ -2505,10 +2521,19 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
 
     ovs_mutex_lock(&pmd->dp->port_mutex);
     port = dp_netdev_lookup_port(pmd->dp, in_port);
-    if (!port || netdev_vport_is_vport_class(port->netdev->netdev_class)) {
+    VLOG_INFO("%s, %d, port: %p, in_port: %d", __FUNCTION__, __LINE__, port, in_port);
+    //if (!port || netdev_vport_is_vport_class(port->netdev->netdev_class)) {
+    if (!port) {
         ovs_mutex_unlock(&pmd->dp->port_mutex);
         goto err_free;
     }
+
+    if (!strcmp(port->type, "vxlan")) {
+        //get dpdk port to use dpdk offload api
+        port_new = get_dpdk_port_by_type(pmd->dp);
+        port = port_new;
+    }
+
     ret = netdev_flow_put(offload->dpif, port->netdev, &offload->match,
                           CONST_CAST(struct nlattr *, offload->actions),
                           offload->actions_len, &flow->mega_ufid, &info,
