@@ -3784,7 +3784,7 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
         struct netdev_flow_dump netdev_dump;
         struct dpif_flow_stats stats;
         struct ofpbuf key, mask;
-        bool dump_offload;
+        bool dump_offload = false;
 
         ofpbuf_use_stack(&key, keybuf, sizeof *keybuf);
         ofpbuf_use_stack(&mask, maskbuf, sizeof *maskbuf);
@@ -3793,9 +3793,10 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
         netdev_dump.netdev = netdev_ports_get(odp_port,
                                               thread_->dpif->dpif_class);
 
-        dump_offload = netdev_flow_dump_next(&netdev_dump, NULL, NULL, &stats, NULL,
-                                             CONST_CAST(ovs_u128 *, &netdev_flow->mega_ufid),
-                                             NULL, NULL);
+        if (netdev_dump.netdev)
+            dump_offload = netdev_flow_dump_next(&netdev_dump, NULL, NULL, &stats, NULL,
+                                                 CONST_CAST(ovs_u128 *, &netdev_flow->mega_ufid),
+                                                 NULL, NULL);
 
         dp_netdev_flow_to_dpif_flow(netdev_flow, &key, &mask, f,
                                     dump->up.terse);
