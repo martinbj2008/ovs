@@ -408,8 +408,6 @@ dump_flow_action(struct rte_flow_action *action)
 
     ds_init(&s);
 
-    VLOG_DBG("\naction->type: %d\n", action->type);
-
     if (action->type == RTE_FLOW_ACTION_TYPE_PORT_ID) {
         const struct rte_flow_action_port_id *output = action->conf;
         ds_put_format(&s, "\nRTE_FLOW_ACTION_TYPE_PORT_ID original: %d, id: %d\n",
@@ -436,6 +434,14 @@ dump_flow_action(struct rte_flow_action *action)
         const uint32_t *dtable = action->conf;
         ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_JUMP\n");
         ds_put_format(&s, "dst table is %d", *dtable);
+    }
+    
+    if (action->type == RTE_FLOW_ACTION_TYPE_COUNT) {
+        const struct rte_flow_action_count *action_count  = action->conf;
+        ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_COUNT\n");
+        ds_put_format(&s, "counter shared: %d, id: %d",
+                      action_count->shared,
+                      action_count->id);
     }
 
     dump_set_action(&s, action);
