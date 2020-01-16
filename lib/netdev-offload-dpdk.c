@@ -1061,7 +1061,7 @@ struct netdev_offload_set_action {
 #define get_mask(a, type) ((const type *)(const void *)(a + 1) + 1)
 
 static int
-netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, struct netdev_offload_set_action* setact)
+netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, struct netdev_offload_set_action* setact, bool is_mask)
 {
     uint8_t ethernet_mask_full[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
     enum ovs_key_attr type = nl_attr_type(a);
@@ -1069,22 +1069,53 @@ netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, 
     switch (type) {
     case OVS_KEY_ATTR_ETHERNET: {
             const struct ovs_key_ethernet *key = nl_attr_get(a);
-            const struct ovs_key_ethernet *mask = get_mask(a, struct ovs_key_ethernet);
-            if (!memcmp(mask->eth_src.ea,  &ethernet_mask_full, ETH_ALEN)) {
-                memcpy(&setact->mac.mac_addr[0], &key->eth_src.ea[0], ETH_ALEN);
-                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_SRC, &setact->mac);
+            const struct ovs_key_ethernet *mask = NULL;
+            bool src_flag = false, dst_flag = false;
+            if (is_mask) {
+                mask = get_mask(a, struct ovs_key_ethernet);
+                if (!memcmp(mask->eth_src.ea,  &ethernet_mask_full, ETH_ALEN)) {
+                    src_flag = true;
+                }
+
+                if (!memcmp(mask->eth_dst.ea,  &ethernet_mask_full, ETH_ALEN)) {
+                    dst_flag = true;
+                }
             }
 
-            if (!memcmp(mask->eth_dst.ea,  &ethernet_mask_full, ETH_ALEN)) {
-                memcpy(setact->mac.mac_addr, key->eth_dst.ea, ETH_ALEN);
-                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_DST, &setact->mac);
+            if (src_flag || !is_mask) {
+                memcpy(setact->smac.mac_addr, key->eth_src.ea, ETH_ALEN);
+                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_SRC, &setact->smac);
+            }
 
+            if (dst_flag || !is_mask) {
+                memcpy(setact->dmac.mac_addr, key->eth_dst.ea, ETH_ALEN);
+                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_MAC_DST, &setact->dmac);
+            }
+
+            break;
+        }
+    case OVS_KEY_ATTR_IPV4: {
+            const struct ovs_key_ipv4 *key = nl_attr_get(a);
+            const struct ovs_key_ipv4 *mask = NULL;
+
+            if (is_mask) {
+                mask = get_mask(a, struct ovs_key_ipv4);
+            } else {
+                VLOG_INFO("Not support Set ipv4 no mask type offload!");
+                return -1;
+            }
+
+            if (mask->ipv4_src) {
+                setact->s_addr.ipv4_addr = key->ipv4_src;
+                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_IPV4_SRC, &setact->s_addr);
+            }
+
+            if (mask->ipv4_dst) {
+                setact->d_addr.ipv4_addr = key->ipv4_dst;
+                add_flow_action(actions, RTE_FLOW_ACTION_TYPE_SET_IPV4_DST, &setact->d_addr);
             }
             break;
         }
-    case OVS_KEY_ATTR_IPV4:
-        break;
-
     case OVS_KEY_ATTR_TCP:
         break;
 
@@ -1504,11 +1535,19 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             netdev_offload_vxlan_host_store(match->flow.nw_dst, cfg_port);
             //add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
             break;
-        case OVS_ACTION_ATTR_SET_MASKED:
+        case OVS_ACTION_ATTR_SET:
             VLOG_INFO("### set action ###");
-            ret = netdev_offload_set_action(nl_attr_get(a), &actions, &set_action);
+            ret = netdev_offload_set_action(nl_attr_get(a), &actions, &set_action, false);
             if (ret) {
                 VLOG_INFO("Set Action offload return error  %d", ret);
+                continue;
+            }
+            break;
+        case OVS_ACTION_ATTR_SET_MASKED:
+            VLOG_INFO("### set mask action ###");
+            ret = netdev_offload_set_action(nl_attr_get(a), &actions, &set_action, true);
+            if (ret) {
+                VLOG_INFO("Set Mask Action offload return error  %d", ret);
                 continue;
             }
             break;
@@ -1532,7 +1571,6 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         case OVS_ACTION_ATTR_CHECK_PKT_LEN:
         case OVS_ACTION_ATTR_UNSPEC:
         case OVS_ACTION_ATTR_USERSPACE:
-        case OVS_ACTION_ATTR_SET:
         case OVS_ACTION_ATTR_SAMPLE:
         case OVS_ACTION_ATTR_CT:
         case OVS_ACTION_ATTR_TRUNC:
