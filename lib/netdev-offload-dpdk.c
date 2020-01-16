@@ -461,6 +461,7 @@ static void
 dump_set_action(struct ds* ps, struct rte_flow_action *action)
 {
     const struct rte_flow_action_set_mac *pmac = NULL;
+    const struct rte_flow_action_set_ipv4 *pipv4 = NULL;
 
     if (action->type == RTE_FLOW_ACTION_TYPE_SET_MAC_SRC) {
         pmac = action->conf;
@@ -478,6 +479,19 @@ dump_set_action(struct ds* ps, struct rte_flow_action *action)
                 pmac->mac_addr[3], pmac->mac_addr[4], pmac->mac_addr[5]);
 
     }
+    
+    if (action->type == RTE_FLOW_ACTION_TYPE_SET_IPV4_SRC) {
+        pipv4 = action->conf;
+        ds_put_cstr(ps, "\nRTE_FLOW_ACTION_TYPE_SET_IPV4_SRC\n");
+        ds_put_format(ps, "set ipv4 addr 0x%x", pipv4->ipv4_addr);
+    }
+    
+    if (action->type == RTE_FLOW_ACTION_TYPE_SET_IPV4_DST) {
+        pipv4 = action->conf;
+        ds_put_cstr(ps, "\nRTE_FLOW_ACTION_TYPE_SET_IPV4_DST\n");
+        ds_put_format(ps, "set ipv4 addr 0x%x", pipv4->ipv4_addr);
+    }
+    
     return;
 }
 
@@ -954,35 +968,86 @@ netdev_offload_map_flow_priority(struct rte_flow_attr * flow_attr, struct offloa
 }
 
 static int
-netdev_offload_jump_group_action(struct rte_flow_attr * flow_attr, RECIRC_TYPE type, uint32_t *dst_table)
+netdev_offload_jump_group_action(
+        struct rte_flow_attr * flow_attr,
+        struct flow_actions *pactions,
+        RECIRC_TYPE type,
+        struct rte_flow_action_jump *ptbl)
 {
     int ret = 0;
+    uint32_t dst_table = 0;
 
     switch (type) {
-        case OFFLOAD_RECIRC_VXLAN:
+        case OFFLOAD_RECIRC_UPCALL:
             flow_attr->group = OFFLOAD_TABLE_ID_FLOW;
-            *dst_table = OFFLOAD_TABLE_ID_VXLAN;
+            dst_table = OFFLOAD_TABLE_ID_UPCALL;
             break;
         case OFFLOAD_RECIRC_WHITELIST:
         case OFFLOAD_RECIRC_BLACKLIST:
-            ret = -1;
-            VLOG_INFO("Unsupport recirc offload type: %d", type);
-            break;
-
+        case OFFLOAD_RECIRC_VXLAN:
+        case OFFLOAD_RECIRC_CT:
         case OFFLOAD_RECIRC_UNKOWN:
-        default:
             ret = -1;
             VLOG_INFO("Unsupport recirc offload type: %d", type);
             break;
     }
 
+    if (!ret && ptbl) {
+        VLOG_INFO("%s, %d, output action #####", __FUNCTION__, __LINE__);
+        ptbl->group = dst_table;
+        add_flow_action(pactions, RTE_FLOW_ACTION_TYPE_JUMP, ptbl);
+    }
+
     return ret;
 }
 
+static int netdev_offload_output_action(
+        struct netdev *netdev,
+        const struct dpif_class *dpif_class,
+        struct flow_actions *pactions,
+        struct rte_flow_action_port_id *pport_id,
+        int *pout_put_action_cnt,
+        odp_port_t port,
+        bool is_vxlan_encap)
+{
+    odp_port_t cfg_port,output_port = port;
+    int dpdk_port_id = 0;
+
+    if (*pout_put_action_cnt) {
+        VLOG_ERR("MLX5 NIC can only one fate actions in a flow, offload fail\n");
+        return -1;
+    }
+
+    cfg_port = netdev_offload_get_odp_port_by_netdev(netdev);
+    if (!cfg_port) {
+        VLOG_ERR("Get config port odp port id failed, netdev name: %s", netdev->name);
+        return -1;
+    }
+
+    if (!port) {
+        output_port = cfg_port;
+    }
+
+    dpdk_port_id = netdev_offload_get_dpdk_index_by_odp_port(cfg_port, output_port, dpif_class, is_vxlan_encap);
+    if (dpdk_port_id == -1) {
+        VLOG_ERR("Get dpdk port index error, cfg_port: %d", cfg_port);
+        return -1;
+    }
+
+    pport_id->id = dpdk_port_id;
+    pport_id->original = 0;
+    add_flow_action(pactions, RTE_FLOW_ACTION_TYPE_PORT_ID, pport_id);
+    *pout_put_action_cnt += 1;
+
+    return 0;
+}
+
 struct netdev_offload_set_action {
-    struct rte_flow_action_set_mac mac;
+    struct rte_flow_action_set_mac smac;
+    struct rte_flow_action_set_mac dmac;
     struct rte_flow_action_set_tp nw_tp;
-    struct rte_flow_action_set_ipv4 ipv4;
+    struct rte_flow_action_set_ipv4 s_addr;
+    struct rte_flow_action_set_ipv4 d_addr;
 };
 
 #define ETH_ALEN  RTE_ETHER_ADDR_LEN
