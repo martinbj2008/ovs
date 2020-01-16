@@ -535,6 +535,12 @@ dump_flow_action(struct rte_flow_action *action)
         ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_JUMP\n");
         ds_put_format(&s, "dst table is %d", *dtable);
     }
+    
+    if (action->type == RTE_FLOW_ACTION_TYPE_METER) {
+        const struct rte_flow_action_meter *mc = action->conf;
+        ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_METER\n");
+        ds_put_format(&s, "meter id %d", mc->mtr_id);
+    }
 
     dump_set_action(&s, action);
 
