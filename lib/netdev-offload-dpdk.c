@@ -620,7 +620,7 @@ static void dpdk_meter_destroy(void *data)
     }
 }
 
-#define DPDK_METER_UPATE_UP 65536 
+#define DPDK_METER_UPATE_UP 65536
 
 static void dpdk_meter_update(void *priv_data, void *config)
 {
@@ -634,7 +634,7 @@ static void dpdk_meter_update(void *priv_data, void *config)
     if (!priv_data || !config) {
         return;
     }
-    
+
     max_rate = ofputil_meter_config_max_rate(config);
     if (dmo->max_rate == max_rate) {
         return;
@@ -700,7 +700,7 @@ dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
     int ret;
 
     meter_id.uint32 = mid;
-    
+
     if (dpif_meter_get_config(dpif, meter_id, &config)) {
         return NULL;
     }
@@ -752,7 +752,7 @@ dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
     }
 
     dpif_meter_set_offload(dpif, meter_id, nom);
-    
+
     free(config.bands);
     return &dmo->mc;
 
@@ -1788,7 +1788,7 @@ netdev_offload_dpdk_flow_dump_next(struct netdev_flow_dump *dump,
 
     stats->n_packets = ethdev_count.hits;
     stats->n_bytes = ethdev_count.bytes;
-    stats->used = time_msec(); 
+    stats->used = time_msec();
     return true;
 }
 
