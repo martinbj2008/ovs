@@ -33,12 +33,15 @@ VLOG_DEFINE_THIS_MODULE(netdev_offload_dpdk);
 
 enum {
     OFFLOAD_TABLE_ID_FLOW = 0,
-    OFFLOAD_TABLE_ID_VXLAN,
+    OFFLOAD_TABLE_ID_UPCALL = 10,
+    OFFLOAD_TABLE_ID_MAX,
 };
 
 typedef enum {
     OFFLOAD_RECIRC_UNKOWN = -1,
     OFFLOAD_RECIRC_VXLAN = 0,
+    OFFLOAD_RECIRC_UPCALL,
+    OFFLOAD_RECIRC_CT,
     OFFLOAD_RECIRC_BLACKLIST,
     OFFLOAD_RECIRC_WHITELIST,
 }RECIRC_TYPE;
@@ -48,7 +51,11 @@ typedef enum {
 
 #define GET_RECIRC_TYPE_BY_ID(id) ((id >> 16) & 0xF)
 #define RECIRC_ID_SPEC_PATTERN 0xFF000000
+#define RECIRC_ID_UPCALL_PATTERN (RECIRC_ID_SPEC_PATTERN | (OFFLOAD_RECIRC_UPCALL << 16))
+#define RECIRC_ID_VXLAN_PATTERN (RECIRC_ID_SPEC_PATTERN | (OFFLOAD_RECIRC_VXLAN << 16))
 #define IS_SPEC_RECIRC_ID(id) ((id & RECIRC_ID_SPEC_PATTERN) == RECIRC_ID_SPEC_PATTERN)
+#define IS_VXLAN_RECIRC_ID(id) ((id & RECIRC_ID_VXLAN_PATTERN) == RECIRC_ID_VXLAN_PATTERN)
+#define IS_UPCALL_RECIRC_ID(id) ((id & RECIRC_ID_UPCALL_PATTERN) == RECIRC_ID_UPCALL_PATTERN)
 
 bool soft_hard_compatible_flag = false;
 enum {
@@ -1359,9 +1366,9 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     struct rte_flow_action_of_push_vlan vlan_push = {0};
     struct rte_flow_action_of_set_vlan_vid vlan_vid = {0};
     const struct ovs_action_push_vlan *vlan = NULL;
-    int dpdk_port_id = 0;
+    struct rte_flow_action_jump tbl;
 
-    if (vxlan_match_flag) {
+    if (vxlan_match_flag && !(IS_UPCALL_RECIRC_ID(match->flow.recirc_id))) {
         VLOG_INFO("### add vxlan decap action ###");
         add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
     }
@@ -1370,29 +1377,11 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         int type = nl_attr_type(a);
         switch ((enum ovs_action_attr) type) {
         case OVS_ACTION_ATTR_OUTPUT: {
-            if (out_put_action_cnt) {
-                VLOG_INFO("MLX5 NIC can only one fate actions in a flow, offload fail\n");
-                ret = -1;
-                goto out;
-            }
-
             odp_port_t odp_port = nl_attr_get_odp_port(a);
-            cfg_port = netdev_offload_get_odp_port_by_netdev(netdev);
-            if (!cfg_port) {
-                VLOG_ERR("Get config port odp port id failed, netdev name: %s", netdev->name);
-            }
-
-            dpdk_port_id = netdev_offload_get_dpdk_index_by_odp_port(cfg_port, odp_port, info->dpif_class, vxlan_encap_flag);
-            if (dpdk_port_id == -1) {
-                VLOG_ERR("Get dpdk port index error, cfg_port: %d", cfg_port);
+            ret = netdev_offload_output_action(netdev, info->dpif_class, &actions, &port_id, &out_put_action_cnt, odp_port, vxlan_encap_flag);
+            if (ret == -1) {
                 continue;
             }
-
-            port_id.id = dpdk_port_id;
-            port_id.original = 0;
-            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_PORT_ID, &port_id);
-
-            out_put_action_cnt ++;
             break;
         }
         case OVS_ACTION_ATTR_METER: {
@@ -1407,36 +1396,18 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             break;
         }
         case OVS_ACTION_ATTR_RECIRC: {
-            VLOG_INFO("### recirc action ###");
             recirc_id = nl_attr_get(a);
             if (recirc_id == NULL || !IS_SPEC_RECIRC_ID(*recirc_id)) {
                 VLOG_INFO("Unsupported this recirc id action: %d", ((recirc_id==NULL) ? -1: *recirc_id));
                 continue;
             }
 
-            if (out_put_action_cnt) {
-                VLOG_INFO("MLX5 NIC can only one fate actions in a flow, offload fail\n");
-                ret = -1;
-                goto out;
-            }
-
-            cfg_port = netdev_offload_get_odp_port_by_netdev(netdev);
-            if (!cfg_port) {
-                VLOG_ERR("Get config port odp port id failed, netdev name: %s", netdev->name);
+            if (IS_UPCALL_RECIRC_ID(*recirc_id)) {
+                netdev_offload_jump_group_action(&flow_attr, &actions, OFFLOAD_RECIRC_UPCALL, &tbl);
                 continue;
             }
 
-            dpdk_port_id = netdev_offload_get_dpdk_index_by_odp_port(cfg_port, cfg_port, info->dpif_class, true);
-            if (dpdk_port_id == -1) {
-                VLOG_ERR("Get dpdk port index error, cfg_port: %d", cfg_port);
-                continue;
-            }
-
-            VLOG_INFO("### recirc action output port: %d###", dpdk_port_id);
-            port_id.id = dpdk_port_id;
-            port_id.original = 0;
-            add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_PORT_ID, &port_id);
-            out_put_action_cnt ++;
+            netdev_offload_output_action(netdev, info->dpif_class, &actions, &port_id, &out_put_action_cnt, 0, true);
             break;
         }
         case OVS_ACTION_ATTR_TUNNEL_PUSH: {
