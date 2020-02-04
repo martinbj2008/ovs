@@ -1164,48 +1164,6 @@ netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, 
     return 0;
 }
 
-static void
-netdev_offload_dpdk_add_actions_to_head(struct flow_actions *pactions, int index)
-{
-    struct rte_flow_action tmp_action;
-    int i = 0;
-    
-    if (index-1 < 0) {
-        return;
-    }
-
-    tmp_action = pactions->actions[index];
-    for (i = index; i > 0; i--) {
-        pactions->actions[i] = pactions->actions[i-1];  
-        if (i-1 == 0) {
-            pactions->actions[0] = tmp_action;
-        }   
-    }
-    
-    return;
-}
-
-static void 
-netdev_offload_dpdk_resort_actions(struct flow_actions *pactions)
-{
-    int i = 0;
-
-    if (!pactions || !pactions->cnt 
-        || pactions->actions[0].type != RTE_FLOW_ACTION_TYPE_VXLAN_DECAP) {
-        VLOG_INFO("No need sort offload actions!");
-        return;
-    } 
-
-    for (i = 0; i < pactions->cnt; i++) {
-        if (pactions->actions[i].type == RTE_FLOW_ACTION_TYPE_METER) {
-            VLOG_INFO("Offload actions contains meter and vxlan devap, we will resort actions"); 
-            netdev_offload_dpdk_add_actions_to_head(pactions, i);
-        } 
-    }
-
-    return;
-}
-
 static int
 netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const struct match *match,
@@ -1632,7 +1590,6 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_COUNT, &action_count);
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_END, NULL);
     
-    netdev_offload_dpdk_resort_actions(&actions);
     netdev_offload_dpdk_dump(&patterns, &actions);
 
     flow = netdev_dpdk_rte_flow_create(netdev, &flow_attr,
