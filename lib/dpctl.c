@@ -1021,6 +1021,25 @@ dpctl_dump_dps(int argc OVS_UNUSED, const char *argv[] OVS_UNUSED,
     return dps_for_each(dpctl_p, dump_cb);
 }
 
+static char*
+dpctl_get_flow_flags(uint32_t flags)
+{
+    switch(flags) {
+        case DPCLS_RULE_FLAGS_NONE:
+            return "none";
+        case DPCLS_RULE_FLAGS_SKIP_HW:
+            return "skip_hw";
+        case DPCLS_RULE_FLAGS_SKIP_HW_ACTION:
+            return "skip_hw_act";
+        case DPCLS_RULE_FLAGS_HW_DROP:
+            return "hw_drop";
+        default:
+            return "unkown";
+    }
+
+    return "unkown";
+}
+
 static void
 format_dpif_flow(struct ds *ds, const struct dpif_flow *f, struct hmap *ports,
                  struct dpctl_params *dpctl_p)
@@ -1031,6 +1050,7 @@ format_dpif_flow(struct ds *ds, const struct dpif_flow *f, struct hmap *ports,
     }
 
     ds_put_format(ds, "priority:%d, ", f->priority);
+    ds_put_format(ds, "flags:%s, ", dpctl_get_flow_flags(f->flow_flags));
     odp_flow_format(f->key, f->key_len, f->mask, f->mask_len, ports, ds,
                     dpctl_p->verbosity);
     ds_put_cstr(ds, ", ");
@@ -1316,6 +1336,7 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
     struct simap port_names;
     int n, error;
     uint32_t priority = DEFAULT_DPCTL_DPCLS_FLOW_PRI;
+    uint32_t flow_flags = DPCLS_RULE_FLAGS_NONE;
 
     error = opt_dpif_open(argc, argv, dpctl_p, 4, &dpif);
     if (error) {
@@ -1335,6 +1356,14 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
     n = odp_priority_from_string(key_s, &priority);
     if (n < 0) {
         dpctl_error(dpctl_p, -n, "parsing flow priority");
+        return -n;
+    } else if (n) {
+        key_s += n;
+    }
+
+    n = odp_flags_from_string(key_s, &flow_flags);
+    if (n < 0) {
+        dpctl_error(dpctl_p, -n, "parsing flow flags");
         return -n;
     } else if (n) {
         key_s += n;
@@ -1387,7 +1416,7 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
                           mask.size, actions.data,
                           actions.size, ufid_present ? &ufid : NULL,
                           PMD_ID_NULL,
-                          priority,
+                          priority, flow_flags,
                           dpctl_p->print_statistics ? &stats : NULL);
 
     if (error) {
@@ -1496,6 +1525,7 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
     struct simap port_names;
     int n, error;
     uint32_t priority = DEFAULT_DPCTL_DPCLS_FLOW_PRI; //only used to parse, del op not need priority parameter
+    uint32_t flow_flags = DPCLS_RULE_FLAGS_NONE;
 
     error = opt_dpif_open(argc, argv, dpctl_p, 3, &dpif);
     if (error) {
@@ -1515,6 +1545,14 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
     n = odp_priority_from_string(key_s, &priority);
     if (n < 0) {
         dpctl_error(dpctl_p, -n, "parsing flow priority");
+        return -n;
+    } else if (n) {
+        key_s += n;
+    }
+
+    n = odp_flags_from_string(key_s, &flow_flags);
+    if (n < 0) {
+        dpctl_error(dpctl_p, -n, "parsing flow flags");
         return -n;
     } else if (n) {
         key_s += n;

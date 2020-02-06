@@ -73,6 +73,7 @@ struct offload_info {
      */
     uint32_t flow_mark;
     uint32_t priority;
+    uint32_t flow_flags;
 };
 
 int netdev_flow_flush(struct netdev *);

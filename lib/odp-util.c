@@ -8434,15 +8434,71 @@ odp_priority_from_string(const char *s_, uint32_t * ppriority)
 {
     const char *s = s_;
     int len = 0;
+    bool parse_flag = false;
 
     if (ovs_scan(s, "priority:")) {
         s += 9;
+        parse_flag = true;
+    }
+
+    if (ovs_scan(s, ",priority:")) {
+        s += 10;
+        parse_flag = true;
+    }
+
+    if (parse_flag) {
         len = scan_u32(s, ppriority, NULL);
         if (len && (*ppriority > MAX_DPCLS_FLOW_PRI || *ppriority == MIN_DPCLS_FLOW_PRI)) { // MIN_DPCLS_FLOW_PRI is reserved for ofctl generated dpcls rule
             return -EINVAL;
         }
 
         s += len;
+        return  s-s_;
+    }
+
+    return 0;
+}
+
+int
+odp_flags_from_string(const char *s_, uint32_t * pflags)
+{
+    const char *s = s_;
+    bool parse_flag = false;
+
+    if (ovs_scan(s, "flags:")) {
+        s += 6;
+        parse_flag = true;
+    }
+
+    if (ovs_scan(s, ",flags:")) {
+        s += 7;
+        parse_flag = true;
+    }
+
+    if (parse_flag) {
+        if(!strncasecmp(s, "none", 4)) {
+            *pflags = DPCLS_RULE_FLAGS_NONE;
+            s += 4;
+        }
+        else if(!strncasecmp(s, "skip_hw_act", 11)) {
+            *pflags = DPCLS_RULE_FLAGS_SKIP_HW_ACTION;
+            s += 11;
+        }
+        else if(!strncasecmp(s, "skip_hw", 7)) {
+            *pflags = DPCLS_RULE_FLAGS_SKIP_HW;
+            s += 7;
+        }
+        else if(!strncasecmp(s, "hw_drop", 7)) {
+            *pflags = DPCLS_RULE_FLAGS_HW_DROP;
+            s += 7;
+        }else {
+            return -EINVAL;
+        }
+
+        if (*pflags >= DPCLS_RULE_FLAGS_MAX) {
+            return -EINVAL;
+        }
+
         return  s-s_;
     }
 

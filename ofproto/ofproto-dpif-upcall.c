@@ -820,7 +820,7 @@ recv_upcalls(struct handler *handler)
                  * message in case it happens frequently. */
                 dpif_flow_put(udpif->dpif, DPIF_FP_CREATE, dupcall->key,
                               dupcall->key_len, NULL, 0, NULL, 0,
-                              &dupcall->ufid, PMD_ID_NULL, MIN_DPCLS_FLOW_PRI, NULL);
+                              &dupcall->ufid, PMD_ID_NULL, MIN_DPCLS_FLOW_PRI, DPCLS_RULE_FLAGS_NONE, NULL);
                 VLOG_INFO_RL(&rl, "received packet on unassociated datapath "
                              "port %"PRIu32, flow->in_port.odp_port);
             }
