@@ -3852,7 +3852,7 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
             }
 
             flow_api = ovsrcu_get(const struct netdev_flow_api *, &netdev_dump.netdev->flow_api);
-            if (strcmp(flow_api->type, "linux_tc")) {
+            if (flow_api && strcmp(flow_api->type, "linux_tc")) {
                 dump_offload = netdev_flow_dump_next(&netdev_dump, NULL, NULL, &stats, NULL,
                                              CONST_CAST(ovs_u128 *, &netdev_flow->mega_ufid),
                                              NULL, NULL);
