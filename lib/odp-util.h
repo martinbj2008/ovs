@@ -168,6 +168,8 @@ enum odp_key_fitness odp_nsh_hdr_from_attr(const struct nlattr *,
 int odp_ufid_from_string(const char *s_, ovs_u128 *ufid);
 int
 odp_priority_from_string(const char *s_, uint32_t * ppriority);
+int
+odp_flags_from_string(const char *s_, uint32_t * pflags);
 void odp_format_ufid(const ovs_u128 *ufid, struct ds *);
 
 void odp_flow_format(const struct nlattr *key, size_t key_len,
@@ -392,6 +394,14 @@ struct attr_len_tbl {
 #define WHITELIST_SUBTABLE_PRI    (WHITELIST_DPCLS_FLOW_PRI -1)
 #define SUBTABLE_PRIORITY(priority) (priority-1)
 #define MIN_SUBTABLE_PRI               0
+
+enum {
+    DPCLS_RULE_FLAGS_NONE = 0,
+    DPCLS_RULE_FLAGS_SKIP_HW,
+    DPCLS_RULE_FLAGS_SKIP_HW_ACTION,
+    DPCLS_RULE_FLAGS_HW_DROP,
+    DPCLS_RULE_FLAGS_MAX
+};
 
 extern const struct attr_len_tbl ovs_flow_key_attr_lens[OVS_KEY_ATTR_MAX + 1];
 #endif /* odp-util.h */
