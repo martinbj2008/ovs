@@ -36,6 +36,9 @@
 #include "util.h"
 #include "csum.h"
 #include "conntrack.h"
+#include "openvswitch/vlog.h"
+
+VLOG_DEFINE_THIS_MODULE(odp_execute);
 
 /* Masked copy of an ethernet address. 'src' is already properly masked. */
 static void
@@ -717,6 +720,62 @@ odp_execute_check_pkt_len(void *dp, struct dp_packet *packet, bool steal,
                         dp_execute_action);
 }
 
+static void 
+odp_execute_icmp_proxy(struct dp_packet *packet)
+{
+    struct ip_header *nh = dp_packet_l3(packet);
+
+    if (OVS_LIKELY(nh->ip_proto == IPPROTO_ICMP)) {
+        struct icmp_header *ih = dp_packet_l4(packet);
+
+        if (OVS_LIKELY(ih->icmp_type == ICMP4_ECHO_REQUEST && ih->icmp_code == 0)) {
+            struct eth_header *eh = dp_packet_eth(packet);
+
+            if (OVS_UNLIKELY(!eh)) {
+                VLOG_INFO("icmp_proxy: get ethernet header fail, maybe not a ethernet frame.");
+                return;
+            }
+
+            struct eth_addr eth_dst = eh->eth_dst;
+            eh->eth_dst = eh->eth_src;
+            eh->eth_src = eth_dst;
+
+            ovs_be16 old_ip_id = nh->ip_id;
+            nh->ip_id = random_uint16();
+            nh->ip_csum = recalc_csum16(nh->ip_csum, old_ip_id, nh->ip_id);
+
+            ovs_16aligned_be32 ip_src = nh->ip_src;
+            nh->ip_src = nh->ip_dst;
+            nh->ip_dst = ip_src;
+
+            ih->icmp_type = ICMP4_ECHO_REPLY;
+            ih->icmp_code = ICMP4_ECHO_REPLY_CODE;
+            ih->icmp_csum = recalc_csum16(ih->icmp_csum,
+                                          htons(ICMP4_ECHO_REQUEST << 8 | ICMP4_ECHO_REQUEST_CODE), 
+                                          htons(ICMP4_ECHO_REPLY << 8 | ICMP4_ECHO_REPLY_CODE));
+        }
+        else {
+            char sip[32];
+            char dip[32];
+
+            inet_ntop(AF_INET, &nh->ip_src, sip, sizeof(sip));
+            inet_ntop(AF_INET, &nh->ip_dst, dip, sizeof(dip));
+
+            VLOG_INFO("icmp_proxy: icmp pkt with sip %s dip %s type %u code %u pass.", 
+                       sip, dip, ih->icmp_type, ih->icmp_code);
+        }
+    }
+    else {
+        char sip[32];
+        char dip[32];
+
+        inet_ntop(AF_INET, &nh->ip_src, sip, sizeof(sip));
+        inet_ntop(AF_INET, &nh->ip_dst, dip, sizeof(dip));
+
+        VLOG_INFO("icmp_proxy: pkt with sip %s dip %s proto %u pass.", sip, dip, nh->ip_proto);
+    }
+}
+
 static bool
 requires_datapath_assistance(const struct nlattr *a)
 {
@@ -749,6 +808,7 @@ requires_datapath_assistance(const struct nlattr *a)
     case OVS_ACTION_ATTR_POP_NSH:
     case OVS_ACTION_ATTR_CT_CLEAR:
     case OVS_ACTION_ATTR_CHECK_PKT_LEN:
+    case OVS_ACTION_ATTR_ICMP_PROXY:
         return false;
 
     case OVS_ACTION_ATTR_UNSPEC:
@@ -988,7 +1048,11 @@ odp_execute_actions(void *dp, struct dp_packet_batch *batch, bool steal,
                 return;
             }
             break;
-
+        case OVS_ACTION_ATTR_ICMP_PROXY:
+            DP_PACKET_BATCH_FOR_EACH(i, packet, batch) {
+                odp_execute_icmp_proxy(packet);
+            }
+            break;
         case OVS_ACTION_ATTR_OUTPUT:
         case OVS_ACTION_ATTR_TUNNEL_PUSH:
         case OVS_ACTION_ATTR_TUNNEL_POP:

@@ -1668,6 +1668,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         case OVS_ACTION_ATTR_CT_CLEAR:
         case OVS_ACTION_ATTR_PUSH_NSH:
         case OVS_ACTION_ATTR_POP_NSH:
+        case OVS_ACTION_ATTR_ICMP_PROXY:
         case __OVS_ACTION_ATTR_MAX:
         default:
             if (info->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION) {

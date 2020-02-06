@@ -141,6 +141,7 @@ odp_action_len(uint16_t type)
     case OVS_ACTION_ATTR_PUSH_NSH: return ATTR_LEN_VARIABLE;
     case OVS_ACTION_ATTR_POP_NSH: return 0;
     case OVS_ACTION_ATTR_CHECK_PKT_LEN: return ATTR_LEN_VARIABLE;
+    case OVS_ACTION_ATTR_ICMP_PROXY: return 0;
 
     case OVS_ACTION_ATTR_UNSPEC:
     case __OVS_ACTION_ATTR_MAX:
@@ -1276,6 +1277,9 @@ format_odp_action(struct ds *ds, const struct nlattr *a,
         break;
     case OVS_ACTION_ATTR_CHECK_PKT_LEN:
         format_odp_check_pkt_len_action(ds, a, portno_names);
+        break;
+    case OVS_ACTION_ATTR_ICMP_PROXY:
+        ds_put_cstr(ds, "icmp_proxy");
         break;
     case OVS_ACTION_ATTR_UNSPEC:
     case __OVS_ACTION_ATTR_MAX:
@@ -2647,6 +2651,13 @@ parse_odp_action__(struct parse_odp_context *context, const char *s,
             nl_msg_end_nested(actions, actions_ofs);
             nl_msg_end_nested(actions, cpl_ofs);
             return s[n + 1] == ')' ? n + 2 : -EINVAL;
+        }
+    }
+
+    {
+        if (!strncmp(s, "icmp_proxy", 10)) {
+            nl_msg_put_flag(actions, OVS_ACTION_ATTR_ICMP_PROXY);
+            return 10;
         }
     }
 
