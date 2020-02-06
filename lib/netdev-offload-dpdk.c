@@ -1228,6 +1228,33 @@ netdev_offload_dpdk_add_mark_rss_action(
     return rss;
 }
 
+enum {
+    UPCALL_TYPE_JUMP_TABLE = 1,
+    UPCALL_TYPE_MARK_RSS
+};
+
+static struct action_rss_data *
+netdev_offload_dpdk_upcall(
+        struct rte_flow_attr * flow_attr,
+        struct netdev *netdev,
+        struct rte_flow_action_mark *pmark,
+        struct flow_actions *pactions,
+        struct rte_flow_action_jump *ptbl,
+        int upcall_type
+        )
+{
+    struct action_rss_data *rss = NULL;
+
+    if (upcall_type == UPCALL_TYPE_MARK_RSS) {
+        flow_attr->transfer = 0;
+        rss = netdev_offload_dpdk_add_mark_rss_action(pactions, netdev, pmark);
+        return rss;
+    }
+
+    netdev_offload_jump_group_action(flow_attr, pactions, OFFLOAD_RECIRC_UPCALL, ptbl);
+    return NULL;
+}
+
 static int
 netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const struct match *match,
@@ -1660,8 +1687,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     action_count.id = info->flow_mark;
     mark.id = info->flow_mark;
     if (info->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION) {
-        flow_attr.transfer = 0;
-        rss = netdev_offload_dpdk_add_mark_rss_action(&actions, netdev, &mark);
+        netdev_offload_dpdk_upcall(&flow_attr, netdev, &mark, &actions, &tbl, UPCALL_TYPE_JUMP_TABLE);
     }
 
     if (info->flow_flags == DPCLS_RULE_FLAGS_HW_DROP) {
