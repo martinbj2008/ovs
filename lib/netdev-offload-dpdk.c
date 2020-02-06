@@ -28,6 +28,7 @@
 #include "openvswitch/vlog.h"
 #include "packets.h"
 #include "uuid.h"
+#include "odp-util.h"
 
 VLOG_DEFINE_THIS_MODULE(netdev_offload_dpdk);
 
@@ -160,6 +161,11 @@ struct ufid_to_rte_flow_data {
     struct cmap_node node;
     ovs_u128 ufid;
     struct rte_flow *rte_flow;
+};
+
+struct action_rss_data {
+    struct rte_flow_action_rss conf;
+    uint16_t queue[0];
 };
 
 /* Find rte_flow with @ufid. */
@@ -535,11 +541,23 @@ dump_flow_action(struct rte_flow_action *action)
         ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_JUMP\n");
         ds_put_format(&s, "dst table is %d", *dtable);
     }
-    
+
     if (action->type == RTE_FLOW_ACTION_TYPE_METER) {
         const struct rte_flow_action_meter *mc = action->conf;
         ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_METER\n");
         ds_put_format(&s, "meter id %d", mc->mtr_id);
+    }
+
+    if (action->type == RTE_FLOW_ACTION_TYPE_MARK) {
+        const struct rte_flow_action_mark *mark = action->conf;
+        ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_MARK\n");
+        ds_put_format(&s, "mark id %d", mark->id);
+    }
+
+    if (action->type == RTE_FLOW_ACTION_TYPE_RSS) {
+        const struct action_rss_data* rss = action->conf;
+        ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_RSS\n");
+        ds_put_format(&s, "queue num %d, func: %d", rss->conf.queue_num, rss->conf.func);
     }
 
     dump_set_action(&s, action);
@@ -568,11 +586,6 @@ add_flow_action(struct flow_actions *actions, enum rte_flow_action_type type,
     actions->actions[cnt].conf = conf;
     actions->cnt++;
 }
-
-struct action_rss_data {
-    struct rte_flow_action_rss conf;
-    uint16_t queue[0];
-};
 
 static void
 netdev_offload_dpdk_dump(struct flow_patterns *patterns,
@@ -1158,6 +1171,57 @@ netdev_offload_set_action(const struct nlattr *a, struct flow_actions *actions, 
     return 0;
 }
 
+static struct action_rss_data *
+add_flow_rss_action(struct flow_actions *actions,
+                    struct netdev *netdev)
+{
+    int i;
+    struct action_rss_data *rss_data;
+
+    rss_data = xmalloc(sizeof *rss_data +
+                       netdev_n_rxq(netdev) * sizeof rss_data->queue[0]);
+    *rss_data = (struct action_rss_data) {
+        .conf = (struct rte_flow_action_rss) {
+            .func = RTE_ETH_HASH_FUNCTION_DEFAULT,
+            .level = 0,
+            .types = 0,
+            .queue_num = netdev_n_rxq(netdev),
+            .queue = rss_data->queue,
+            .key_len = 0,
+            .key  = NULL
+        },
+    };
+
+    /* Override queue array with default. */
+    for (i = 0; i < netdev_n_rxq(netdev); i++) {
+       rss_data->queue[i] = i;
+    }
+
+    add_flow_action(actions, RTE_FLOW_ACTION_TYPE_RSS, &rss_data->conf);
+
+    return rss_data;
+}
+
+static struct action_rss_data *
+netdev_offload_dpdk_add_mark_rss_action(
+        struct flow_actions *actions,
+        struct netdev *netdev,
+        struct rte_flow_action_mark *pmark)
+{
+    struct action_rss_data *rss;
+
+    if (actions->cnt) {
+        free(actions->actions);
+        actions->cnt = 0;
+        actions->current_max = 0;
+    }
+
+    add_flow_action(actions, RTE_FLOW_ACTION_TYPE_MARK, pmark);
+    rss = add_flow_rss_action(actions, netdev);
+
+    return rss;
+}
+
 static int
 netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const struct match *match,
@@ -1444,7 +1508,8 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     const struct nlattr *a;
     unsigned int left;
 
-    if (!actions_len || !nl_actions) {
+    if ((!actions_len || !nl_actions) &&
+            info->flow_flags == DPCLS_RULE_FLAGS_NONE) {
         VLOG_INFO("%s: skip flow offload without actions\n", netdev_get_name(netdev));
         ret = -1;
         goto out;
@@ -1572,6 +1637,9 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         case OVS_ACTION_ATTR_POP_NSH:
         case __OVS_ACTION_ATTR_MAX:
         default:
+            if (info->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION) {
+                continue;
+            }
             VLOG_INFO("%s: only support output action\n", netdev_get_name(netdev));
             ret = -1;
             goto out;
@@ -1579,17 +1647,33 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     }
 
     struct rte_flow_action_count action_count;
+    struct rte_flow_action_mark mark;
+    struct action_rss_data *rss = NULL;
+
     action_count.shared = 0;
     action_count.id = info->flow_mark;
+    mark.id = info->flow_mark;
+    if (info->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION) {
+        flow_attr.transfer = 0;
+        rss = netdev_offload_dpdk_add_mark_rss_action(&actions, netdev, &mark);
+    }
+
+    if (info->flow_flags == DPCLS_RULE_FLAGS_HW_DROP) {
+        flow_attr.transfer = 0;
+        add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_DROP, NULL);
+    }
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_COUNT, &action_count);
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_END, NULL);
-    
+
     netdev_offload_dpdk_dump(&patterns, &actions);
 
     flow = netdev_dpdk_rte_flow_create(netdev, &flow_attr,
                                        patterns.items,
                                        actions.actions, &error);
 
+    if (rss) {
+        free(rss);
+    }
     if (!flow) {
         VLOG_ERR("%s: rte flow create error: %u : message : %s\n",
                  netdev_get_name(netdev), error.type, error.message);
