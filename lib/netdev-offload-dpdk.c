@@ -479,19 +479,19 @@ dump_set_action(struct ds* ps, struct rte_flow_action *action)
                 pmac->mac_addr[3], pmac->mac_addr[4], pmac->mac_addr[5]);
 
     }
-    
+
     if (action->type == RTE_FLOW_ACTION_TYPE_SET_IPV4_SRC) {
         pipv4 = action->conf;
         ds_put_cstr(ps, "\nRTE_FLOW_ACTION_TYPE_SET_IPV4_SRC\n");
         ds_put_format(ps, "set ipv4 addr 0x%x", pipv4->ipv4_addr);
     }
-    
+
     if (action->type == RTE_FLOW_ACTION_TYPE_SET_IPV4_DST) {
         pipv4 = action->conf;
         ds_put_cstr(ps, "\nRTE_FLOW_ACTION_TYPE_SET_IPV4_DST\n");
         ds_put_format(ps, "set ipv4 addr 0x%x", pipv4->ipv4_addr);
     }
-    
+
     return;
 }
 

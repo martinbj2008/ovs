@@ -3830,19 +3830,19 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
         odp_port_t odp_port = netdev_flow->flow.in_port.odp_port;
         netdev_dump.netdev = netdev_ports_get(odp_port,
                                               thread_->dpif->dpif_class);
-        
+
         {
             dump_offload = false;
             struct dp_netdev_port *port;
             const struct netdev_flow_api *flow_api = NULL;
             struct dpif_netdev *dpif = dpif_netdev_cast(thread->up.dpif);
             struct dp_netdev *dp = get_dp_netdev(&dpif->dpif);
-          
+
             if (netdev_dump.netdev == NULL) { //VXLAN port bypass by dpdk port channel
                 port = get_dpdk_port_by_type(dp);
                 if (port) {
                     netdev_dump.netdev = port->netdev;
-                } 
+                }
             }
 
             flow_api = ovsrcu_get(const struct netdev_flow_api *, &netdev_dump.netdev->flow_api);
@@ -3852,10 +3852,10 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
                                              NULL, NULL);
             }
         }
-        
+
         dp_netdev_flow_to_dpif_flow(netdev_flow, &key, &mask, f,
                                     dump->up.terse);
-        
+
         if (dump_offload) {
             f->stats = stats;
             f->attrs.offloaded = true;
