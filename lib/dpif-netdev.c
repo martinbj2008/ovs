@@ -3829,30 +3829,29 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
         struct dpif_flow_stats stats;
         struct ofpbuf key, mask;
         bool dump_offload = false;
+        struct dp_netdev_port *port;
+        struct dpif_netdev *dpif = dpif_netdev_cast(thread->up.dpif);
+        struct dp_netdev *dp = get_dp_netdev(&dpif->dpif);
 
         ofpbuf_use_stack(&key, keybuf, sizeof *keybuf);
         ofpbuf_use_stack(&mask, maskbuf, sizeof *maskbuf);
 
         odp_port_t odp_port = netdev_flow->flow.in_port.odp_port;
-        netdev_dump.netdev = netdev_ports_get(odp_port,
-                                              thread_->dpif->dpif_class);
+        ovs_mutex_lock(&dp->port_mutex);
+        port = dp_netdev_lookup_port(dp, odp_port);
+        ovs_mutex_unlock(&dp->port_mutex);
 
-        {
+        if (port) {
+            netdev_dump.netdev = port->netdev;
             dump_offload = false;
-            struct dp_netdev_port *port;
-            const struct netdev_flow_api *flow_api = NULL;
-            struct dpif_netdev *dpif = dpif_netdev_cast(thread->up.dpif);
-            struct dp_netdev *dp = get_dp_netdev(&dpif->dpif);
-
-            if (netdev_dump.netdev == NULL) { //VXLAN port bypass by dpdk port channel
+            if (!strcmp(port->type, "vxlan")) {
                 port = get_dpdk_port_by_type(dp);
                 if (port) {
                     netdev_dump.netdev = port->netdev;
                 }
             }
 
-            flow_api = ovsrcu_get(const struct netdev_flow_api *, &netdev_dump.netdev->flow_api);
-            if (flow_api && strcmp(flow_api->type, "linux_tc")) {
+            if (!strcmp(port->type, "dpdk")){
                 dump_offload = netdev_flow_dump_next(&netdev_dump, NULL, NULL, &stats, NULL,
                                              CONST_CAST(ovs_u128 *, &netdev_flow->mega_ufid),
                                              NULL, NULL);

@@ -970,6 +970,7 @@ netdev_offload_get_dpdk_index_by_odp_port(odp_port_t cfg_port, odp_port_t id, co
 
     VLOG_INFO("### get port name %s ###", dst_netdev->name);
     dpdk_port = netdev_dpdk_get_portid(dst_netdev);
+    netdev_close(dst_netdev);
     return dpdk_port;
 }
 
