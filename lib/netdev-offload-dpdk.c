@@ -598,7 +598,6 @@ netdev_offload_dpdk_dump(struct flow_patterns *patterns,
                          struct flow_actions *actions)
 {
     int i;
-    VLOG_INFO("XXX: dump rte pattern and aciton\n");
     for (i = 0; i < patterns->cnt; i++) {
         dump_flow_pattern(&patterns->items[i]);
     }
@@ -606,8 +605,6 @@ netdev_offload_dpdk_dump(struct flow_patterns *patterns,
     for (i = 0; i < actions->cnt; i++) {
         dump_flow_action(&actions->actions[i]);
     }
-
-    VLOG_INFO("XXX: dump rte pattern and aciton end!\n");
 }
 
 struct dpdk_meter_offload {
@@ -845,7 +842,6 @@ netdev_offload_get_odp_port_by_netdev(struct netdev *netdev)
 {
     int i = 0;
 
-    VLOG_INFO("#######netdev: %p", netdev);
     for (i = UPLINK; i < OFFLOAD_PORT_MAX; i++) {
         if (port_map[i].pdev == netdev) {
             return port_map[i].port_id;
@@ -968,7 +964,6 @@ netdev_offload_get_dpdk_index_by_odp_port(odp_port_t cfg_port, odp_port_t id, co
         return -1;
     }
 
-    VLOG_INFO("### get port name %s ###", dst_netdev->name);
     dpdk_port = netdev_dpdk_get_portid(dst_netdev);
     netdev_close(dst_netdev);
     return dpdk_port;
@@ -1019,7 +1014,6 @@ netdev_offload_jump_group_action(
     }
 
     if (!ret && ptbl) {
-        VLOG_INFO("%s, %d, output action #####", __FUNCTION__, __LINE__);
         ptbl->group = dst_table;
         add_flow_action(pactions, RTE_FLOW_ACTION_TYPE_JUMP, ptbl);
     }
@@ -1561,7 +1555,6 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     struct rte_flow_action_jump tbl;
 
     if (vxlan_match_flag && !(IS_UPCALL_RECIRC_ID(match->flow.recirc_id))) {
-        VLOG_INFO("### add vxlan decap action ###");
         add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
     }
 
@@ -1626,7 +1619,6 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             //add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
             break;
         case OVS_ACTION_ATTR_SET:
-            VLOG_INFO("### set action ###");
             ret = netdev_offload_set_action(nl_attr_get(a), &actions, &set_action, false);
             if (ret) {
                 VLOG_INFO("Set Action offload return error  %d", ret);
@@ -1634,7 +1626,6 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             }
             break;
         case OVS_ACTION_ATTR_SET_MASKED:
-            VLOG_INFO("### set mask action ###");
             ret = netdev_offload_set_action(nl_attr_get(a), &actions, &set_action, true);
             if (ret) {
                 VLOG_INFO("Set Mask Action offload return error  %d", ret);

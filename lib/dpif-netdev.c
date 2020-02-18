@@ -2532,8 +2532,6 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
 
     ovs_mutex_lock(&pmd->dp->port_mutex);
     port = dp_netdev_lookup_port(pmd->dp, in_port);
-    VLOG_INFO("%s, %d, port: %p, in_port: %d", __FUNCTION__, __LINE__, port, in_port);
-    //if (!port || netdev_vport_is_vport_class(port->netdev->netdev_class)) {
     if (!port) {
         ovs_mutex_unlock(&pmd->dp->port_mutex);
         goto err_free;
@@ -3129,7 +3127,6 @@ dp_netdev_pmd_find_flow(const struct dp_netdev_pmd_thread *pmd,
         CMAP_FOR_EACH_WITH_HASH (netdev_flow, node, dp_netdev_flow_hash(ufidp),
                                  &pmd->flow_table) {
             if (ovs_u128_equals(netdev_flow->ufid, *ufidp) && netdev_flow->priority == priority) {
-                VLOG_INFO("%s, %d, netflow->priority:%d, priority:%d", __FUNCTION__, __LINE__, netdev_flow->priority, priority);
                 return netdev_flow;
             }
         }
