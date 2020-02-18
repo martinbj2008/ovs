@@ -880,7 +880,7 @@ netdev_offload_get_final_output_port_id(odp_port_t cfg_port_id, odp_port_t out_i
     }
 
 error:
-    VLOG_ERR("Get offload final output port error!");
+    VLOG_WARN("Get offload final output port error!");
     return 0; //error
 }
 
@@ -955,12 +955,12 @@ netdev_offload_get_dpdk_index_by_odp_port(odp_port_t cfg_port, odp_port_t id, co
 
     struct netdev *dst_netdev = netdev_ports_get(final_port, dpif_class);
     if (!dst_netdev) {
-        VLOG_ERR("when offload output, can't find output port\n");
+        VLOG_WARN("when offload output, can't find output port\n");
         return -1;
     }
 
     if (strncmp(dst_netdev->netdev_class->type, "dpdk", 4) != 0) {
-        VLOG_ERR("can't offload output port to non-dpdk port %s\n", dst_netdev->name);
+        VLOG_WARN("can't offload output port to non-dpdk port %s\n", dst_netdev->name);
         return -1;
     }
 
@@ -1034,13 +1034,13 @@ static int netdev_offload_output_action(
     int dpdk_port_id = 0;
 
     if (*pout_put_action_cnt) {
-        VLOG_ERR("MLX5 NIC can only one fate actions in a flow, offload fail\n");
+        VLOG_WARN("MLX5 NIC can only one fate actions in a flow, offload fail\n");
         return -1;
     }
 
     cfg_port = netdev_offload_get_odp_port_by_netdev(netdev);
     if (!cfg_port) {
-        VLOG_ERR("Get config port odp port id failed, netdev name: %s", netdev->name);
+        VLOG_WARN("Get config port odp port id failed, netdev name: %s", netdev->name);
         return -1;
     }
 
@@ -1050,7 +1050,7 @@ static int netdev_offload_output_action(
 
     dpdk_port_id = netdev_offload_get_dpdk_index_by_odp_port(cfg_port, output_port, dpif_class, is_vxlan_encap);
     if (dpdk_port_id == -1) {
-        VLOG_ERR("Get dpdk port index error, cfg_port: %d", cfg_port);
+        VLOG_WARN("Get dpdk port index error, cfg_port: %d", cfg_port);
         return -1;
     }
 
@@ -1378,13 +1378,13 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             vxlan_match_flag = true;
             cfg_port = netdev_offload_get_vxlan_pop_pf_id(match->flow.tunnel.ip_dst);
             if (!cfg_port) {
-                VLOG_ERR("Can not get vxlan pop cfg port id, dst ip: 0x%x", match->flow.tunnel.ip_dst);
+                VLOG_WARN("Can not get vxlan pop cfg port id, dst ip: 0x%x", match->flow.tunnel.ip_dst);
             }
 
             int port_enum;
             port_enum = netdev_offload_get_enum_by_odp_port(cfg_port);
             if (port_enum == OFFLOAD_PORT_MAX) {
-                VLOG_ERR("Can not get offload port enum, port id: %d", cfg_port);
+                VLOG_WARN("Can not get offload port enum, port id: %d", cfg_port);
             } else {
                 VLOG_INFO("match vxlan, set config port to %s", port_map[port_enum].name);
                 netdev = port_map[port_enum].pdev;
@@ -1576,7 +1576,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                 VLOG_INFO("add flow action: RTE_FLOW_ACTION_TYPE_METER: %d", RTE_FLOW_ACTION_TYPE_METER);
                 add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_METER, mc);
             } else {
-                VLOG_INFO("Can't get the rte flow meter, meter offload fail");
+                VLOG_WARN("Can't get the rte flow meter, meter offload fail");
             }
             break;
         }
@@ -1612,7 +1612,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         case OVS_ACTION_ATTR_TUNNEL_POP:
             cfg_port=netdev_offload_get_odp_port_by_netdev(netdev);
             if (!cfg_port) {
-                VLOG_ERR("Get config port odp port id failed, netdev name: %s", netdev->name);
+                VLOG_WARN("Get config port odp port id failed, netdev name: %s", netdev->name);
                 continue;
             }
             netdev_offload_vxlan_host_store(match->flow.nw_dst, cfg_port);

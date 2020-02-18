@@ -2511,7 +2511,7 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
          */
         mark = megaflow_to_mark_find(&flow->mega_ufid);
         if (mark != INVALID_FLOW_MARK) {
-            VLOG_DBG("Flow has already been offloaded with mark %u\n", mark);
+            VLOG_INFO("Flow ufid:"UUID_FMT" has already been offloaded with mark %u\n", UUID_ARGS((struct uuid *)&flow->mega_ufid), mark);
             if (flow->mark != INVALID_FLOW_MARK) {
                 ovs_assert(flow->mark == mark);
             } else {
@@ -3421,6 +3421,10 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
         odp_format_ufid(ufid, &ds);
         ds_put_cstr(&ds, " ");
         odp_format_ufid(&flow->mega_ufid, &ds);
+        ds_put_cstr(&ds, " ");
+        ds_put_format(&ds, "priority:%d", flow->priority);
+        ds_put_cstr(&ds, " ");
+        ds_put_format(&ds, "flags:%d", flow->flow_flags);
         ds_put_cstr(&ds, " ");
         odp_flow_format(key_buf.data, key_buf.size,
                         mask_buf.data, mask_buf.size,
