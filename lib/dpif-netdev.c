@@ -3401,7 +3401,7 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
         queue_netdev_flow_put(pmd, flow, match, actions, actions_len);
     }
 
-    if (OVS_UNLIKELY(!VLOG_DROP_DBG((&upcall_rl)))) {
+    if (OVS_UNLIKELY(!VLOG_DROP_INFO((&upcall_rl)))) {
         struct ds ds = DS_EMPTY_INITIALIZER;
         struct ofpbuf key_buf, mask_buf;
         struct odp_flow_key_parms odp_parms = {
@@ -3420,13 +3420,15 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
         ds_put_cstr(&ds, "flow_add: ");
         odp_format_ufid(ufid, &ds);
         ds_put_cstr(&ds, " ");
+        odp_format_ufid(&flow->mega_ufid, &ds);
+        ds_put_cstr(&ds, " ");
         odp_flow_format(key_buf.data, key_buf.size,
                         mask_buf.data, mask_buf.size,
                         NULL, &ds, false);
         ds_put_cstr(&ds, ", actions:");
         format_odp_actions(&ds, actions, actions_len, NULL);
 
-        VLOG_DBG("%s", ds_cstr(&ds));
+        VLOG_INFO("%s", ds_cstr(&ds));
 
         ofpbuf_uninit(&key_buf);
         ofpbuf_uninit(&mask_buf);
@@ -3440,7 +3442,7 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
         memset(&m.tun_md, 0, sizeof m.tun_md);
         match_format(&m, NULL, &ds, OFP_DEFAULT_PRIORITY);
 
-        VLOG_DBG("%s", ds_cstr(&ds));
+        VLOG_INFO("%s", ds_cstr(&ds));
 
         ds_destroy(&ds);
     }
