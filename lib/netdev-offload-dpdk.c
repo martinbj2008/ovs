@@ -1041,7 +1041,6 @@ static int netdev_offload_output_action(
     cfg_port = netdev_offload_get_odp_port_by_netdev(netdev);
     if (!cfg_port) {
         VLOG_WARN("Get config port odp port id failed, netdev name: %s", netdev->name);
-        return -1;
     }
 
     if (!port) {
