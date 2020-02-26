@@ -2390,7 +2390,7 @@ mark_to_flow_disassociate(struct dp_netdev_pmd_thread *pmd,
         ovs_mutex_unlock(&pmd->dp->port_mutex);
 
         flow_mark_free(mark);
-        VLOG_DBG("Freed flow mark %u\n", mark);
+        VLOG_INFO("Freed flow mark %u, ufid:"UUID_FMT"\n", mark, UUID_ARGS((struct uuid *)&flow->mega_ufid));
 
         megaflow_to_mark_disassociate(&flow->mega_ufid);
     }
