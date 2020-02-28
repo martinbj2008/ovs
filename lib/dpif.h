@@ -506,6 +506,12 @@ struct dpif_flow_dump_types {
     bool netdev_flows;
 };
 
+struct dpif_flow_extra_para {
+    uint32_t priority;
+    uint32_t flow_flags;
+    uint32_t counter_id;
+};
+
 void dpif_flow_stats_extract(const struct flow *, const struct dp_packet *packet,
                              long long int used, struct dpif_flow_stats *);
 void dpif_flow_stats_format(const struct dpif_flow_stats *, struct ds *);
@@ -529,11 +535,13 @@ int dpif_flow_put(struct dpif *, enum dpif_flow_put_flags,
                   const struct nlattr *key, size_t key_len,
                   const struct nlattr *mask, size_t mask_len,
                   const struct nlattr *actions, size_t actions_len,
-                  const ovs_u128 *ufid, const unsigned pmd_id, const uint32_t priority,
-                  const uint32_t flow_flags, struct dpif_flow_stats *);
+                  const ovs_u128 *ufid, const unsigned pmd_id,
+                  const struct dpif_flow_extra_para para,
+                  struct dpif_flow_stats *);
 int dpif_flow_del(struct dpif *,
                   const struct nlattr *key, size_t key_len,
-                  const ovs_u128 *ufid, const unsigned pmd_id, uint32_t priority,
+                  const ovs_u128 *ufid, const unsigned pmd_id, 
+                  const struct dpif_flow_extra_para para,
                   struct dpif_flow_stats *);
 int dpif_flow_get(struct dpif *,
                   const struct nlattr *key, size_t key_len,
@@ -589,6 +597,7 @@ struct dpif_flow {
     ovs_u128 ufid;                /* Unique flow identifier. */
     uint32_t priority;            /* dpcls flow priority, current only support 0-16, 1-16 is appctl priority, 0 is ofctl*/
     uint32_t flow_flags;
+    uint32_t counter_id;
     bool ufid_present;            /* True if 'ufid' was provided by datapath.*/
     unsigned pmd_id;              /* Datapath poll mode driver id. */
     struct dpif_flow_stats stats; /* Flow statistics. */
@@ -618,6 +627,7 @@ enum dpif_offload_type {
     DPIF_OFFLOAD_NEVER,        /* Never offload to hardware. */
     DPIF_OFFLOAD_ALWAYS,       /* Always offload to hardware. */
 };
+
 
 /* Add or modify a flow.
  *
@@ -657,8 +667,7 @@ struct dpif_flow_put {
     size_t actions_len;             /* Length of 'actions' in bytes. */
     const ovs_u128 *ufid;           /* Optional unique flow identifier. */
     unsigned pmd_id;                /* Datapath poll mode driver id. */
-    uint32_t priority;
-    uint32_t flow_flags;
+    struct dpif_flow_extra_para para; /*add for extra parameters we needed*/
     /* Output. */
     struct dpif_flow_stats *stats;  /* Optional flow statistics. */
 };
@@ -690,7 +699,7 @@ struct dpif_flow_del {
     bool terse;                     /* OK to skip sending/receiving full flow
                                      * info? */
     unsigned pmd_id;                /* Datapath poll mode driver id. */
-    uint32_t priority;
+    struct dpif_flow_extra_para para; /*add for extra parameters we needed*/
     /* Output. */
     struct dpif_flow_stats *stats;  /* Optional flow statistics. */
 };

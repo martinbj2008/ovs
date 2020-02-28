@@ -79,6 +79,7 @@
 #include "unixctl.h"
 #include "util.h"
 #include "uuid.h"
+#include "counter.h"
 
 VLOG_DEFINE_THIS_MODULE(dpif_netdev);
 
@@ -459,6 +460,11 @@ struct dp_netdev_flow_stats {
     atomic_uint16_t tcp_flags;     /* Bitwise-OR of seen tcp_flags values. */
 };
 
+struct dp_netdev_flow_stats_brief {
+    atomic_ullong packet_count;
+    atomic_ullong byte_count;
+};
+
 /* A flow in 'dp_netdev_pmd_thread's 'flow_table'.
  *
  *
@@ -509,6 +515,7 @@ struct dp_netdev_flow {
 
     uint32_t priority;          /*add for dpcls subtable priority, this is same with subtable*/
     uint32_t flow_flags;
+    uint32_t counter_id;
     /* Number of references.
      * The classifier owns one reference.
      * Any thread trying to keep a rule from being freed should hold its own
@@ -520,6 +527,7 @@ struct dp_netdev_flow {
 
     /* Statistics. */
     struct dp_netdev_flow_stats stats;
+    struct dp_netdev_flow_stats_brief old_stats;
 
     /* Actions. */
     OVSRCU_TYPE(struct dp_netdev_actions *) actions;
@@ -1486,6 +1494,7 @@ dpif_netdev_init(void)
                              "",
                              0, 0, dpif_netdev_show_max_flow,
                              NULL);
+    dp_counter_init();
     return 0;
 }
 
@@ -2189,6 +2198,9 @@ static void
 dp_netdev_flow_free(struct dp_netdev_flow *flow)
 {
     dp_netdev_actions_free(dp_netdev_flow_get_actions(flow));
+    if (flow->counter_id) {
+        dp_counter_unref(flow->counter_id);
+    }
     free(flow);
 }
 
@@ -3206,6 +3218,7 @@ dp_netdev_flow_to_dpif_flow(const struct dp_netdev_flow *netdev_flow,
     flow->pmd_id = netdev_flow->pmd_id;
     flow->priority = netdev_flow->priority;
     flow->flow_flags = netdev_flow->flow_flags;
+    flow->counter_id = netdev_flow->counter_id;
     get_dpif_flow_stats(netdev_flow, &flow->stats);
 
     flow->attrs.offloaded = false;
@@ -3345,8 +3358,9 @@ dp_netdev_get_mega_ufid(const struct match *match, ovs_u128 *mega_ufid)
 
 static struct dp_netdev_flow *
 dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
-                   struct match *match, const ovs_u128 *ufid, uint32_t priority,
-                   uint32_t flow_flags, const struct nlattr *actions, size_t actions_len)
+                   struct match *match, const ovs_u128 *ufid,
+                   const struct nlattr *actions, size_t actions_len,
+                   const struct dpif_flow_extra_para para)
     OVS_REQUIRES(pmd->flow_mutex)
 {
     struct dp_netdev_flow *flow;
@@ -3376,6 +3390,7 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
     /* Do not allocate extra space. */
     flow = xmalloc(sizeof *flow - sizeof flow->cr.flow.mf + mask.len);
     memset(&flow->stats, 0, sizeof flow->stats);
+    memset(&flow->old_stats, 0, sizeof flow->old_stats);
     flow->dead = false;
     flow->batch = NULL;
     flow->mark = INVALID_FLOW_MARK;
@@ -3384,20 +3399,23 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
     *CONST_CAST(ovs_u128 *, &flow->ufid) = *ufid;
     ovs_refcount_init(&flow->ref_cnt);
     ovsrcu_set(&flow->actions, dp_netdev_actions_create(actions, actions_len));
-    flow->priority = priority;
-    flow->flow_flags = flow_flags;
-
+    flow->priority = para.priority;
+    flow->flow_flags = para.flow_flags;
+    flow->counter_id = para.counter_id;
+    if (para.counter_id) {
+        dp_counter_ref(para.counter_id);
+    }
     dp_netdev_get_mega_ufid(match, CONST_CAST(ovs_u128 *, &flow->mega_ufid));
     netdev_flow_key_init_masked(&flow->cr.flow, &match->flow, &mask);
 
     /* Select dpcls for in_port. Relies on in_port to be exact match. */
     cls = dp_netdev_pmd_find_dpcls(pmd, in_port);
-    dpcls_insert(cls, &flow->cr, &mask, is_gw_appctl_ufid(ufid), priority);
+    dpcls_insert(cls, &flow->cr, &mask, is_gw_appctl_ufid(ufid), para.priority);
 
     cmap_insert(&pmd->flow_table, CONST_CAST(struct cmap_node *, &flow->node),
                 dp_netdev_flow_hash(&flow->ufid));
 
-    if (flow_flags != DPCLS_RULE_FLAGS_SKIP_HW) {
+    if (flow->flow_flags != DPCLS_RULE_FLAGS_SKIP_HW) {
         queue_netdev_flow_put(pmd, flow, match, actions, actions_len);
     }
 
@@ -3425,6 +3443,8 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
         ds_put_format(&ds, "priority:%d", flow->priority);
         ds_put_cstr(&ds, " ");
         ds_put_format(&ds, "flags:%d", flow->flow_flags);
+        ds_put_cstr(&ds, " ");
+        ds_put_format(&ds, "counter:%d", flow->counter_id);
         ds_put_cstr(&ds, " ");
         odp_flow_format(key_buf.data, key_buf.size,
                         mask_buf.data, mask_buf.size,
@@ -3470,7 +3490,7 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
     }
 
     ovs_mutex_lock(&pmd->flow_mutex);
-    netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL, put->priority);
+    netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL, put->para.priority);
     if (netdev_flow && !is_gw_appctl_ufid(&netdev_flow->ufid) && is_gw_appctl_ufid(ufid) && put->flags & DPIF_FP_CREATE) { //when flow add confict, appctl flow will ignore normal upcall flows
         netdev_flow = NULL;
     }
@@ -3478,8 +3498,8 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
     if (!netdev_flow) {
         if (put->flags & DPIF_FP_CREATE) {
             if (cmap_count(&pmd->flow_table) < netdev_max_flows) {
-                dp_netdev_flow_add(pmd, match, ufid, put->priority, put->flow_flags,
-                        put->actions, put->actions_len);
+                dp_netdev_flow_add(pmd, match, ufid, put->actions,
+                        put->actions_len, put->para);
                 error = 0;
             } else {
                 error = EFBIG;
@@ -3607,7 +3627,7 @@ dpif_netdev_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
                 put->stats->tcp_flags |= pmd_stats.tcp_flags;
             }
 
-            if (put->priority == WHITELIST_DPCLS_FLOW_PRI)
+            if (put->para.priority == WHITELIST_DPCLS_FLOW_PRI)
                 whitelist_flow_init(pmd, match.flow.in_port.odp_port);
         }
     } else {
@@ -3632,7 +3652,7 @@ flow_del_on_pmd(struct dp_netdev_pmd_thread *pmd,
 
     ovs_mutex_lock(&pmd->flow_mutex);
     netdev_flow = dp_netdev_pmd_find_flow(pmd, del->ufid, del->key,
-                                          del->key_len, del->priority);
+                                          del->key_len, del->para.priority);
     if (netdev_flow) {
         if (stats) {
             get_dpif_flow_stats(netdev_flow, stats);
@@ -3761,6 +3781,34 @@ dpif_netdev_flow_dump_thread_destroy(struct dpif_flow_dump_thread *thread_)
     free(thread);
 }
 
+static void
+dpif_netdev_flow_counter_process(struct dp_netdev_flow *netdev_flow,
+        bool offload, struct dpif_flow_stats *pstats)
+{
+    uint64_t npkts, nbytes, npkts_old, nbytes_old;
+
+    if (netdev_flow->counter_id == 0 || (offload && netdev_flow->pmd_id != NON_PMD_CORE_ID)) {
+        return;
+    }
+
+    if (!offload) {
+        atomic_read_relaxed(&netdev_flow->stats.packet_count, &npkts);
+        atomic_read_relaxed(&netdev_flow->stats.byte_count, &nbytes);
+    }else {
+        npkts = pstats->n_packets;
+        nbytes = pstats->n_bytes;
+    }
+
+    atomic_read_relaxed(&netdev_flow->old_stats.packet_count, &npkts_old);
+    atomic_read_relaxed(&netdev_flow->old_stats.byte_count, &nbytes_old);
+    if (npkts > npkts_old && nbytes > nbytes_old) {
+        dp_counter_push(netdev_flow->counter_id, netdev_flow->pmd_id,
+                npkts-npkts_old, nbytes-nbytes_old, DP_COUNTER_PMD_STATS_TYPE_ADD);
+        atomic_store_relaxed(&netdev_flow->old_stats.packet_count, npkts);
+        atomic_store_relaxed(&netdev_flow->old_stats.byte_count, nbytes);
+    }
+}
+
 static int
 dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
                            struct dpif_flow *flows, int max_flows)
@@ -3864,6 +3912,7 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
         dp_netdev_flow_to_dpif_flow(netdev_flow, &key, &mask, f,
                                     dump->up.terse);
 
+        dpif_netdev_flow_counter_process(netdev_flow, dump_offload, &stats);
         if (dump_offload) {
             f->stats = stats;
             f->attrs.offloaded = true;
@@ -6926,7 +6975,11 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
     add_actions = put_actions->size ? put_actions : actions;
     if (OVS_LIKELY(error != ENOSPC)) {
         struct dp_netdev_flow *netdev_flow;
-
+        struct dpif_flow_extra_para para = {
+            .priority = MIN_DPCLS_FLOW_PRI,
+            .flow_flags = DPCLS_RULE_FLAGS_NONE,
+            .counter_id = DEFAULT_COUNTER_ID,
+        };
         /* XXX: There's a race window where a flow covering this packet
          * could have already been installed since we last did the flow
          * lookup before upcall.  This could be solved by moving the
@@ -6935,9 +6988,8 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
         ovs_mutex_lock(&pmd->flow_mutex);
         netdev_flow = dp_netdev_pmd_lookup_flow(pmd, key, NULL, INT_MIN);
         if (OVS_LIKELY(!netdev_flow)) {
-            netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid, MIN_DPCLS_FLOW_PRI,
-                                             DPCLS_RULE_FLAGS_NONE, add_actions->data,
-                                             add_actions->size);
+            netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid, add_actions->data,
+                                             add_actions->size, para);
         }
         ovs_mutex_unlock(&pmd->flow_mutex);
         uint32_t hash = dp_netdev_flow_hash(&netdev_flow->ufid);
@@ -8380,6 +8432,11 @@ static void whitelist_flow_init(struct dp_netdev_pmd_thread *pmd, odp_port_t in_
     struct flow flow;
     struct match match;
     ovs_u128 ufid;
+    struct dpif_flow_extra_para para = {
+        .priority = MIN_DPCTL_DPCLS_FLOW_PRI,
+        .flow_flags = DPCLS_RULE_FLAGS_NONE,
+        .counter_id = DEFAULT_COUNTER_ID,
+    };
 
     if (!whitelist_drop_flow_lookup(pmd, in_port)) {
         //init match , flow,
@@ -8397,7 +8454,7 @@ static void whitelist_flow_init(struct dp_netdev_pmd_thread *pmd, odp_port_t in_
         netdev_flow_key_init_masked(&key, &match.flow, &mask);
 
         ovs_mutex_lock(&pmd->flow_mutex);
-        dp_netdev_flow_add(pmd, &match, &ufid, 1, DPCLS_RULE_FLAGS_NONE, NULL, 0); //whitelist drop priority is 1
+        dp_netdev_flow_add(pmd, &match, &ufid, NULL, 0, para); //whitelist drop priority is 1
         ovs_mutex_unlock(&pmd->flow_mutex);
     }
 }

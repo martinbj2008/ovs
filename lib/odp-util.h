@@ -170,6 +170,7 @@ int
 odp_priority_from_string(const char *s_, uint32_t * ppriority);
 int
 odp_flags_from_string(const char *s_, uint32_t * pflags);
+int odp_counter_from_string(const char *s_, uint32_t * pcounter);
 void odp_format_ufid(const ovs_u128 *ufid, struct ds *);
 
 void odp_flow_format(const struct nlattr *key, size_t key_len,
@@ -394,6 +395,7 @@ struct attr_len_tbl {
 #define WHITELIST_SUBTABLE_PRI    (WHITELIST_DPCLS_FLOW_PRI -1)
 #define SUBTABLE_PRIORITY(priority) (priority-1)
 #define MIN_SUBTABLE_PRI               0
+#define DEFAULT_COUNTER_ID             0
 
 enum {
     DPCLS_RULE_FLAGS_NONE = 0,

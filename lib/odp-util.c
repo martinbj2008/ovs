@@ -8648,3 +8648,33 @@ odp_flags_from_string(const char *s_, uint32_t * pflags)
 
     return 0;
 }
+
+int
+odp_counter_from_string(const char *s_, uint32_t * pcounter)
+{
+    const char *s = s_;
+    int len = 0;
+    bool parse_flag = false;
+
+    if (ovs_scan(s, "counter:")) {
+        s += 8;
+        parse_flag = true;
+    }
+
+    if (ovs_scan(s, ",counter:")) {
+        s += 9;
+        parse_flag = true;
+    }
+
+    if (parse_flag) {
+        len = scan_u32(s, pcounter, NULL);
+        if (len && (*pcounter == DEFAULT_COUNTER_ID)) {
+            return -EINVAL;
+        }
+
+        s += len;
+        return  s-s_;
+    }
+
+    return 0;
+}

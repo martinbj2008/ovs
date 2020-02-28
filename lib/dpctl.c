@@ -56,7 +56,7 @@
 VLOG_DEFINE_THIS_MODULE(dpctl);
 
 #include "qos.h"
-
+#include "counter.h"
 typedef int dpctl_command_handler(int argc, const char *argv[],
                                   struct dpctl_params *);
 struct dpctl_command {
@@ -1054,6 +1054,7 @@ format_dpif_flow(struct ds *ds, const struct dpif_flow *f, struct hmap *ports,
 
     ds_put_format(ds, "priority:%d, ", f->priority);
     ds_put_format(ds, "flags:%s, ", dpctl_get_flow_flags(f->flow_flags));
+    ds_put_format(ds, "counter:%d, ", f->counter_id);
     odp_flow_format(f->key, f->key_len, f->mask, f->mask_len, ports, ds,
                     dpctl_p->verbosity);
     ds_put_cstr(ds, ", ");
@@ -1338,8 +1339,11 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
     bool ufid_present;
     struct simap port_names;
     int n, error;
-    uint32_t priority = DEFAULT_DPCTL_DPCLS_FLOW_PRI;
-    uint32_t flow_flags = DPCLS_RULE_FLAGS_NONE;
+    struct dpif_flow_extra_para para = {
+        .priority = DEFAULT_DPCTL_DPCLS_FLOW_PRI,
+        .flow_flags = DPCLS_RULE_FLAGS_NONE,
+        .counter_id = DEFAULT_COUNTER_ID,
+    };
 
     error = opt_dpif_open(argc, argv, dpctl_p, 4, &dpif);
     if (error) {
@@ -1356,7 +1360,7 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
         ufid_present = true;
     }
 
-    n = odp_priority_from_string(key_s, &priority);
+    n = odp_priority_from_string(key_s, &para.priority);
     if (n < 0) {
         dpctl_error(dpctl_p, -n, "parsing flow priority");
         return -n;
@@ -1364,9 +1368,17 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
         key_s += n;
     }
 
-    n = odp_flags_from_string(key_s, &flow_flags);
+    n = odp_flags_from_string(key_s, &para.flow_flags);
     if (n < 0) {
         dpctl_error(dpctl_p, -n, "parsing flow flags");
+        return -n;
+    } else if (n) {
+        key_s += n;
+    }
+
+    n = odp_counter_from_string(key_s, &para.counter_id);
+    if (n < 0) {
+        dpctl_error(dpctl_p, -n, "parsing counter id");
         return -n;
     } else if (n) {
         key_s += n;
@@ -1389,13 +1401,13 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
     }
 
     ofpbuf_init(&actions, 0);
-    if (priority == WHITELIST_DPCLS_FLOW_PRI || priority == BLACKLIST_SUBTABLE_PRI) {
-        if (priority == WHITELIST_DPCLS_FLOW_PRI && strcasecmp(actions_s, "accept")) {
+    if (para.priority == WHITELIST_DPCLS_FLOW_PRI || para.priority == BLACKLIST_SUBTABLE_PRI) {
+        if (para.priority == WHITELIST_DPCLS_FLOW_PRI && strcasecmp(actions_s, "accept")) {
             dpctl_error(dpctl_p, error, "Priority %d is whitelist, only support accept action", WHITELIST_SUBTABLE_PRI);
             goto out_freeactions;
         }
 
-        if (priority == BLACKLIST_DPCLS_FLOW_PRI && strcasecmp(actions_s, "drop")) {
+        if (para.priority == BLACKLIST_DPCLS_FLOW_PRI && strcasecmp(actions_s, "drop")) {
             dpctl_error(dpctl_p, error, "Priority %d is blacklist, only support drop action", BLACKLIST_SUBTABLE_PRI);
             goto out_freeactions;
         }
@@ -1419,7 +1431,7 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
                           mask.size, actions.data,
                           actions.size, ufid_present ? &ufid : NULL,
                           PMD_ID_NULL,
-                          priority, flow_flags,
+                          para,
                           dpctl_p->print_statistics ? &stats : NULL);
 
     if (error) {
@@ -1527,8 +1539,11 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
     bool ufid_present;
     struct simap port_names;
     int n, error;
-    uint32_t priority = DEFAULT_DPCTL_DPCLS_FLOW_PRI; //only used to parse, del op not need priority parameter
-    uint32_t flow_flags = DPCLS_RULE_FLAGS_NONE;
+    struct dpif_flow_extra_para para = {
+        .priority = DEFAULT_DPCTL_DPCLS_FLOW_PRI, //only used to parse, del op not need priority parameter
+        .flow_flags = DPCLS_RULE_FLAGS_NONE,
+        .counter_id = DEFAULT_COUNTER_ID,
+    };
 
     error = opt_dpif_open(argc, argv, dpctl_p, 3, &dpif);
     if (error) {
@@ -1545,7 +1560,7 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
         ufid_present = true;
     }
 
-    n = odp_priority_from_string(key_s, &priority);
+    n = odp_priority_from_string(key_s, &para.priority);
     if (n < 0) {
         dpctl_error(dpctl_p, -n, "parsing flow priority");
         return -n;
@@ -1553,9 +1568,17 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
         key_s += n;
     }
 
-    n = odp_flags_from_string(key_s, &flow_flags);
+    n = odp_flags_from_string(key_s, &para.flow_flags);
     if (n < 0) {
         dpctl_error(dpctl_p, -n, "parsing flow flags");
+        return -n;
+    } else if (n) {
+        key_s += n;
+    }
+
+    n = odp_counter_from_string(key_s, &para.counter_id);
+    if (n < 0) {
+        dpctl_error(dpctl_p, -n, "parsing counter id");
         return -n;
     } else if (n) {
         key_s += n;
@@ -1584,7 +1607,7 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
 
     /* The flow will be deleted from all pmds currently in the datapath. */
     error = dpif_flow_del(dpif, key.data, key.size,
-                          ufid_present ? &ufid : NULL, PMD_ID_NULL, priority,
+                          ufid_present ? &ufid : NULL, PMD_ID_NULL, para,
                           dpctl_p->print_statistics ? &stats : NULL);
 
     if (error) {
@@ -2818,7 +2841,104 @@ out:
 
     return error;
 }
-
+
+static int
+dpctl_add_counter(int argc, const char *argv[],
+                  struct dpctl_params *dpctl_p)
+{
+    uint32_t cnt;
+    int err = 0;
+
+    if(ovs_scan(argv[argc-1], "id=%"SCNu32, &cnt)) {
+        err = dp_counter_add(cnt);
+        if (err) {
+            dpctl_error(dpctl_p, err, "%s", dp_counter_get_error_string(err));
+        }
+    } else {
+        dpctl_error(dpctl_p, -1, "get counter id failed");
+    }
+
+    return err;
+}
+
+static int
+dpctl_del_counter(int argc, const char *argv[],
+                  struct dpctl_params *dpctl_p)
+{
+    uint32_t cnt;
+    int err = 0;
+
+    if(ovs_scan(argv[argc-1], "id=%"SCNu32, &cnt)) {
+        err = dp_counter_delete(cnt);
+        if (err) {
+            dpctl_error(dpctl_p, err, "%s", dp_counter_get_error_string(err));
+        }
+    } else {
+        dpctl_error(dpctl_p, -1, "get counter id failed");
+    }
+
+    return err;
+}
+
+static int
+dpctl_dump_counter(int argc, const char *argv[],
+                  struct dpctl_params *dpctl_p)
+{
+    int cnt = 0, cnt_id = 0;
+    struct dp_counter_dump_t *pdump = NULL;
+    struct dp_counter_dump_t *pdump_tmp = NULL;
+    int err = 0, cnt_i = 0, pmd_i = 0;
+
+    if (argc == 1) {
+        err = dp_counter_get_dump_all_counter(&pdump, &cnt);
+        if (err == DP_COUNTER_ERR_NONE && cnt && pdump) {
+            dpctl_print(dpctl_p, "Total counter number: %d\n", cnt);
+            for (cnt_i=0; cnt_i < cnt; cnt_i++) {
+                pdump_tmp = &pdump[cnt_i];
+                dpctl_print(dpctl_p, "id:%d, n_packets:%lu, n_bytes:%lu\n",
+                        pdump_tmp->id, pdump_tmp->npkts, pdump_tmp->nbytes);
+                if (dpctl_p->verbosity) {
+                    for (pmd_i = 0; pmd_i < pdump_tmp->n_pmd; pmd_i ++) {
+                        dpctl_print(dpctl_p, "   pmdid:%d, pmdid_hash:%u, n_packets:%lu,"
+                                "n_bytes:%lu\n", pdump_tmp->pmd[pmd_i].pmd_id,
+                                pdump_tmp->pmd[pmd_i].hash,
+                                pdump_tmp->pmd[pmd_i].npkts,
+                                pdump_tmp->pmd[pmd_i].nbytes);
+                    }
+                }
+            }
+
+            free(pdump);
+        }
+
+        if (err) {
+            dpctl_error(dpctl_p, err, "%s", dp_counter_get_error_string(err));
+        }
+    }else {
+        if(ovs_scan(argv[argc-1], "id=%"SCNu32, &cnt_id)) {
+            err = dp_counter_get_dump_info_by_id(cnt_id, &pdump);
+            if (err == DP_COUNTER_ERR_NONE && pdump) {
+                dpctl_print(dpctl_p, "id:%d, n_packets:%lu, n_bytes:%lu\n",
+                        pdump->id, pdump->npkts, pdump->nbytes);
+                if (dpctl_p->verbosity) {
+                    for (pmd_i = 0; pmd_i < pdump->n_pmd; pmd_i ++) {
+                        dpctl_print(dpctl_p, "   pmdid:%d, pmdid_hash:%u, n_packets:%lu,"
+                                "n_bytes:%lu\n", pdump->pmd[pmd_i].pmd_id,
+                                pdump->pmd[pmd_i].hash,
+                                pdump->pmd[pmd_i].npkts,
+                                pdump->pmd[pmd_i].nbytes);
+                    }
+                }
+                free(pdump);
+            }
+        } else {
+            dpctl_error(dpctl_p, -1, "get counter id failed");
+        }
+    }
+
+    return 0;
+}
+
 static const struct dpctl_command all_commands[] = {
     { "add-dp", "dp [iface...]", 1, INT_MAX, dpctl_add_dp, DP_RW },
     { "del-dp", "dp", 1, 1, dpctl_del_dp, DP_RW },
@@ -2834,6 +2954,9 @@ static const struct dpctl_command all_commands[] = {
     { "get-flow", "[dp] ufid", 1, 2, dpctl_get_flow, DP_RO },
     { "del-flow", "[dp] flow", 1, 2, dpctl_del_flow, DP_RW },
     { "del-flows", "[dp]", 0, 1, dpctl_del_flows, DP_RW },
+    { "add-counter", "id=counter_id", 1, 1, dpctl_add_counter, DP_RW },
+    { "del-counter", "id=counter_id", 1, 1, dpctl_del_counter, DP_RW },
+    { "dump-counter", "[id=counter_id]", 0, 2, dpctl_dump_counter, DP_RO },
     { "add-qos", "dst=ipv4,reg=xx,rate=xx,dir=input/output", 1, 1, dpctl_add_qos, DP_RW },
     { "del-qos", "dst=ipv4,reg=xx,dir=input/output", 1, 1, dpctl_del_qos, DP_RW },
     { "get-qos", "", 0, 0, dpctl_get_qos, DP_RO },

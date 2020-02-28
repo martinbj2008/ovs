@@ -780,6 +780,11 @@ recv_upcalls(struct handler *handler)
     struct upcall upcalls[UPCALL_MAX_BATCH];
     struct flow flows[UPCALL_MAX_BATCH];
     size_t n_upcalls, i;
+    struct dpif_flow_extra_para para = {
+        .priority = MIN_DPCLS_FLOW_PRI,
+        .flow_flags = DPCLS_RULE_FLAGS_NONE,
+        .counter_id = DEFAULT_COUNTER_ID,
+    };
 
     n_upcalls = 0;
     while (n_upcalls < UPCALL_MAX_BATCH) {
@@ -820,7 +825,7 @@ recv_upcalls(struct handler *handler)
                  * message in case it happens frequently. */
                 dpif_flow_put(udpif->dpif, DPIF_FP_CREATE, dupcall->key,
                               dupcall->key_len, NULL, 0, NULL, 0,
-                              &dupcall->ufid, PMD_ID_NULL, MIN_DPCLS_FLOW_PRI, DPCLS_RULE_FLAGS_NONE, NULL);
+                              &dupcall->ufid, PMD_ID_NULL, para, NULL);
                 VLOG_INFO_RL(&rl, "received packet on unassociated datapath "
                              "port %"PRIu32, flow->in_port.odp_port);
             }
@@ -2312,6 +2317,12 @@ static void
 delete_op_init__(struct udpif *udpif, struct ukey_op *op,
                  const struct dpif_flow *flow)
 {
+    struct dpif_flow_extra_para para = {
+        .priority = MIN_DPCLS_FLOW_PRI,
+        .flow_flags = DPCLS_RULE_FLAGS_NONE,
+        .counter_id = DEFAULT_COUNTER_ID,
+    };
+
     op->ukey = NULL;
     op->dop.type = DPIF_OP_FLOW_DEL;
     op->dop.flow_del.key = flow->key;
@@ -2319,13 +2330,19 @@ delete_op_init__(struct udpif *udpif, struct ukey_op *op,
     op->dop.flow_del.ufid = flow->ufid_present ? &flow->ufid : NULL;
     op->dop.flow_del.pmd_id = flow->pmd_id;
     op->dop.flow_del.stats = &op->stats;
-    op->dop.flow_del.priority = MIN_DPCLS_FLOW_PRI;
+    op->dop.flow_del.para = para;
     op->dop.flow_del.terse = udpif_use_ufid(udpif);
 }
 
 static void
 delete_op_init(struct udpif *udpif, struct ukey_op *op, struct udpif_key *ukey)
 {
+    struct dpif_flow_extra_para para = {
+        .priority = MIN_DPCLS_FLOW_PRI,
+        .flow_flags = DPCLS_RULE_FLAGS_NONE,
+        .counter_id = DEFAULT_COUNTER_ID,
+    };
+
     op->ukey = ukey;
     op->dop.type = DPIF_OP_FLOW_DEL;
     op->dop.flow_del.key = ukey->key;
@@ -2333,7 +2350,7 @@ delete_op_init(struct udpif *udpif, struct ukey_op *op, struct udpif_key *ukey)
     op->dop.flow_del.ufid = ukey->ufid_present ? &ukey->ufid : NULL;
     op->dop.flow_del.pmd_id = ukey->pmd_id;
     op->dop.flow_del.stats = &op->stats;
-    op->dop.flow_del.priority = MIN_DPCLS_FLOW_PRI;
+    op->dop.flow_del.para = para;
     op->dop.flow_del.terse = udpif_use_ufid(udpif);
 }
 
@@ -2341,6 +2358,12 @@ static void
 put_op_init(struct ukey_op *op, struct udpif_key *ukey,
             enum dpif_flow_put_flags flags)
 {
+    struct dpif_flow_extra_para para = {
+        .priority = MIN_DPCLS_FLOW_PRI,
+        .flow_flags = DPCLS_RULE_FLAGS_NONE,
+        .counter_id = DEFAULT_COUNTER_ID,
+    };
+
     op->ukey = ukey;
     op->dop.type = DPIF_OP_FLOW_PUT;
     op->dop.flow_put.flags = flags;
@@ -2351,7 +2374,7 @@ put_op_init(struct ukey_op *op, struct udpif_key *ukey,
     op->dop.flow_put.ufid = ukey->ufid_present ? &ukey->ufid : NULL;
     op->dop.flow_put.pmd_id = ukey->pmd_id;
     op->dop.flow_put.stats = NULL;
-    op->dop.flow_put.priority= MIN_DPCLS_FLOW_PRI;
+    op->dop.flow_put.para = para;
     ukey_get_actions(ukey, &op->dop.flow_put.actions,
                      &op->dop.flow_put.actions_len);
 }
