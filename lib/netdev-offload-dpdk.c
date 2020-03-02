@@ -539,14 +539,14 @@ dump_flow_action(struct rte_flow_action *action)
         ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_JUMP\n");
         ds_put_format(&s, "dst table is %d", *dtable);
     }
-    
+
     if (action->type == RTE_FLOW_ACTION_TYPE_COUNT) {
         const struct rte_flow_action_count *action_count  = action->conf;
         ds_put_cstr(&s, "\nRTE_FLOW_ACTION_TYPE_COUNT\n");
         ds_put_format(&s, "counter shared: %d, id: %d",
                       action_count->shared,
                       action_count->id);
-    }    
+    }
 
     if (action->type == RTE_FLOW_ACTION_TYPE_METER) {
         const struct rte_flow_action_meter *mc = action->conf;
