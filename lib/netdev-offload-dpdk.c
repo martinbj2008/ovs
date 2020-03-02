@@ -1679,6 +1679,10 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     action_count.id = info->flow_mark;
     mark.id = info->flow_mark;
     if (info->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION) {
+        //discard all offload actions before because of upcall action
+        free(actions.actions);
+        actions.actions = NULL;
+        actions.cnt = 0;
         netdev_offload_dpdk_upcall(&flow_attr, netdev, &mark, &actions, &tbl, UPCALL_TYPE_JUMP_TABLE);
     }
 
