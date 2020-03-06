@@ -730,8 +730,8 @@ dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
     dmo->mp_id = mid;
 
     mp.alg = RTE_MTR_SRTCM_RFC2697;
-    mp.srtcm_rfc2697.cir = max_rate *1024 /8; /* rate_max Kbps*/
-    mp.srtcm_rfc2697.cbs = max_rate *1024 /8;
+    mp.srtcm_rfc2697.cir = max_rate *1024LLU /8; /* rate_max Kbps*/
+    mp.srtcm_rfc2697.cbs = max_rate *1024LLU /8;
     mp.srtcm_rfc2697.ebs = 0;
 
     ret = rte_mtr_meter_profile_add(dmo->port_id, dmo->mc.mtr_id,
