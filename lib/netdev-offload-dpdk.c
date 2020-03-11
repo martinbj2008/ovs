@@ -1790,7 +1790,7 @@ netdev_offload_dpdk_destroy_flow(struct netdev *netdev,
 
     if (ret == 0) {
         ufid_to_rte_flow_disassociate(ufid);
-        VLOG_DBG("%s: removed rte flow %p associated with ufid " UUID_FMT "\n",
+        VLOG_INFO("%s: removed rte flow %p associated with ufid " UUID_FMT "\n",
                  netdev_get_name(netdev), rte_flow,
                  UUID_ARGS((struct uuid *)ufid));
     } else {

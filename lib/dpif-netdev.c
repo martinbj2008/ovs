@@ -2391,12 +2391,19 @@ mark_to_flow_disassociate(struct dp_netdev_pmd_thread *pmd,
      * remove the flow from hardware and free the mark.
      */
     if (flow_mark_has_no_ref(mark)) {
-        struct dp_netdev_port *port;
+        struct dp_netdev_port *port, *port_new;
         odp_port_t in_port = flow->flow.in_port.odp_port;
 
         ovs_mutex_lock(&pmd->dp->port_mutex);
         port = dp_netdev_lookup_port(pmd->dp, in_port);
         if (port) {
+            if (!strcmp(port->type, "vxlan")) {
+                //get dpdk port to use dpdk offload api
+                port_new = get_dpdk_port_by_type(pmd->dp);
+                if (port_new) {
+                    port = port_new;
+                }
+            }
             ret = netdev_flow_del(port->netdev, &flow->mega_ufid, NULL);
         }
         ovs_mutex_unlock(&pmd->dp->port_mutex);
@@ -2552,7 +2559,9 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
     if (!strcmp(port->type, "vxlan")) {
         //get dpdk port to use dpdk offload api
         port_new = get_dpdk_port_by_type(pmd->dp);
-        port = port_new;
+        if (port_new) {
+            port = port_new;
+        }
     }
 
     ret = netdev_flow_put(offload->dpif, port->netdev, &offload->match,
