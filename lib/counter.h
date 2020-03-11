@@ -24,6 +24,7 @@ struct dp_counter_dump_t {
     uint64_t nbytes;
     int n_pmd;
     int id;
+    int ref_cnt;
     struct dp_counter_dump_pmd_t pmd[MAX_DUMP_PMD];
 };
 

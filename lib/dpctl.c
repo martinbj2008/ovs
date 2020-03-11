@@ -2895,8 +2895,8 @@ dpctl_dump_counter(int argc, const char *argv[],
             dpctl_print(dpctl_p, "Total counter number: %d\n", cnt);
             for (cnt_i=0; cnt_i < cnt; cnt_i++) {
                 pdump_tmp = &pdump[cnt_i];
-                dpctl_print(dpctl_p, "id:%d, n_packets:%lu, n_bytes:%lu\n",
-                        pdump_tmp->id, pdump_tmp->npkts, pdump_tmp->nbytes);
+                dpctl_print(dpctl_p, "id:%d, ref_cnt:%d, n_packets:%lu, n_bytes:%lu\n",
+                        pdump_tmp->id, pdump_tmp->ref_cnt, pdump_tmp->npkts, pdump_tmp->nbytes);
                 if (dpctl_p->verbosity) {
                     for (pmd_i = 0; pmd_i < pdump_tmp->n_pmd; pmd_i ++) {
                         dpctl_print(dpctl_p, "   pmdid:%d, pmdid_hash:%u, n_packets:%lu,"
@@ -2918,8 +2918,8 @@ dpctl_dump_counter(int argc, const char *argv[],
         if(ovs_scan(argv[argc-1], "id=%"SCNu32, &cnt_id)) {
             err = dp_counter_get_dump_info_by_id(cnt_id, &pdump);
             if (err == DP_COUNTER_ERR_NONE && pdump) {
-                dpctl_print(dpctl_p, "id:%d, n_packets:%lu, n_bytes:%lu\n",
-                        pdump->id, pdump->npkts, pdump->nbytes);
+                dpctl_print(dpctl_p, "id:%d, ref_cnt:%d, n_packets:%lu, n_bytes:%lu\n",
+                        pdump->id, pdump->ref_cnt, pdump->npkts, pdump->nbytes);
                 if (dpctl_p->verbosity) {
                     for (pmd_i = 0; pmd_i < pdump->n_pmd; pmd_i ++) {
                         dpctl_print(dpctl_p, "   pmdid:%d, pmdid_hash:%u, n_packets:%lu,"

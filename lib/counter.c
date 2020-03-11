@@ -130,6 +130,7 @@ dp_counter_get_stats_by_node(
 
     memset(dump, 0, sizeof(struct dp_counter_dump_t));
     dump->id = node->id;
+    dump->ref_cnt = ovs_refcount_read(&node->ref_cnt);
     for (i = 0; i < MAX_PMD_OBJ_HASH_BUCKET; i++) {
         ovs_mutex_lock(&node->pmd_cnt[i].mutex);
         HMAP_FOR_EACH(obj, node, &node->pmd_cnt[i].pmd_obj) {
@@ -164,7 +165,6 @@ dp_counter_get_dump_all_counter(struct dp_counter_dump_t** dump OVS_UNUSED, int 
 
     count = cmap_count(&dp_counter.counter_cmap);
     *cnt = count;
-    VLOG_INFO("counter cnt: %d", *cnt);
     if (count)  {
         //need free by user
         dump_tmp = (struct dp_counter_dump_t *)xmalloc(sizeof(struct dp_counter_dump_t) * count);
@@ -237,11 +237,23 @@ void
 dp_counter_ref(int id)
 {
     struct dp_counter_node_t *counter_node = NULL;
+    if (!id) {
+        return;
+    }
+
     ovs_mutex_lock(&dp_counter.mutex);
     counter_node = dp_counter_node_get(id);
-    if (counter_node) {
-         ovs_refcount_ref(&counter_node->ref_cnt);
+    if (!counter_node) {
+        counter_node = xmalloc(sizeof(struct dp_counter_node_t));
+        if (NULL == counter_node) {
+            ovs_mutex_unlock(&dp_counter.mutex);
+            return;
+        }
+
+        dp_counter_node_init_default(counter_node, id);
+        cmap_insert(&dp_counter.counter_cmap, &counter_node->node, id);
     }
+    ovs_refcount_ref(&counter_node->ref_cnt);
     ovs_mutex_unlock(&dp_counter.mutex);
     return;
 }
@@ -250,10 +262,19 @@ void
 dp_counter_unref(int id)
 {
     struct dp_counter_node_t *counter_node = NULL;
+    if (!id) {
+        return;
+    }
+
     ovs_mutex_lock(&dp_counter.mutex);
     counter_node = dp_counter_node_get(id);
     if (counter_node) {
-         ovs_refcount_unref(&counter_node->ref_cnt);
+        ovs_refcount_unref(&counter_node->ref_cnt);
+        if (ovs_refcount_read(&counter_node->ref_cnt) == 1) {
+            cmap_remove(&dp_counter.counter_cmap, &counter_node->node, id);
+            dp_counter_pmd_counter_destroy(counter_node);
+            ovsrcu_postpone(free, counter_node);
+        }
     }
     ovs_mutex_unlock(&dp_counter.mutex);
     return;
