@@ -862,6 +862,7 @@ enum ovs_nat_attr {
     OVS_NAT_ATTR_ZONE,
     OVS_NAT_ATTR_RS,
     OVS_NAT_ATTR_POOL,
+    OVS_NAT_ATTR_TOA,
 	__OVS_NAT_ATTR_MAX,
 };
 
@@ -961,7 +962,7 @@ struct check_pkt_len_arg {
  * @OVS_ACTION_ATTR_CHECK_PKT_LEN: Check the packet length and execute a set
  * of actions if greater than the specified packet length, else execute
  * another set of actions.
- * @OVS_ACTION_ATTR_ICMP_PROXY: send icmp reply to source host instead of 
+ * @OVS_ACTION_ATTR_ICMP_PROXY: send icmp reply to source host instead of
  * sending to real dst, act like proxy for icmp. Only support echo request.
  */
 

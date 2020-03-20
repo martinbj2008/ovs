@@ -631,46 +631,48 @@ nat_packet(struct dp_packet *pkt, struct conn *conn, bool related)
         pkt->md.ct_state |= CS_SRC_NAT;
         if (conn->key.dl_type == htons(ETH_TYPE_IP)) {
             struct ip_header *nh = dp_packet_l3(pkt);
-            if (!conn->toa_added && conn->key.nw_proto == IPPROTO_TCP && nh->ip_proto == IPPROTO_TCP) {
-                struct tcp_header *th = dp_packet_l4(pkt);
-                uint16_t tcp_flags = TCP_FLAGS(th->tcp_ctl);
-                uint16_t ip_tot_len;
-                uint8_t *tcp_len;
-                uint16_t tcp_csum_len;
-                ip_tot_len = ntohs(nh->ip_tot_len);
-                tcp_len = (uint8_t *)&th->tcp_ctl;
-                tcp_csum_len = (*tcp_len >> 4)*4;
-                //set toa option to sync and ack packet without payload
-                if (ip_tot_len == tcp_csum_len + IP_HEADER_LEN) {
-                    if ((tcp_flags & TCP_SYN) == TCP_SYN || (tcp_flags & TCP_ACK) == TCP_ACK) {
-                        //TODO: fastopen
-                        ovs_be16 tcp_ctl;
-                        char *toa_opt;
-                        ovs_be32 *high, *low;
-                        //append toa option.
-                        toa_opt = dp_packet_put_uninit(pkt, TOA_OPT_SIZE);
-                        toa_opt[0] = TCPOPT_TOA_CIP;
-                        toa_opt[1] = TOA_OPT_SIZE;
-                        *((ovs_be16*)(toa_opt+2)) = th->tcp_src;
-                        *((ovs_16aligned_be32*)(toa_opt+4)) = nh->ip_src;
+            if (conn->nat_info->nat_action & NAT_ACTION_TOA) {
+                if (!conn->toa_added && conn->key.nw_proto == IPPROTO_TCP && nh->ip_proto == IPPROTO_TCP) {
+                    struct tcp_header *th = dp_packet_l4(pkt);
+                    uint16_t tcp_flags = TCP_FLAGS(th->tcp_ctl);
+                    uint16_t ip_tot_len;
+                    uint8_t *tcp_len;
+                    uint16_t tcp_csum_len;
+                    ip_tot_len = ntohs(nh->ip_tot_len);
+                    tcp_len = (uint8_t *)&th->tcp_ctl;
+                    tcp_csum_len = (*tcp_len >> 4)*4;
+                    //set toa option to sync and ack packet without payload
+                    if (ip_tot_len == tcp_csum_len + IP_HEADER_LEN) {
+                        if ((tcp_flags & TCP_SYN) == TCP_SYN || (tcp_flags & TCP_ACK) == TCP_ACK) {
+                            //TODO: fastopen
+                            ovs_be16 tcp_ctl;
+                            char *toa_opt;
+                            ovs_be32 *high, *low;
+                            //append toa option.
+                            toa_opt = dp_packet_put_uninit(pkt, TOA_OPT_SIZE);
+                            toa_opt[0] = TCPOPT_TOA_CIP;
+                            toa_opt[1] = TOA_OPT_SIZE;
+                            *((ovs_be16*)(toa_opt+2)) = th->tcp_src;
+                            *((ovs_16aligned_be32*)(toa_opt+4)) = nh->ip_src;
 
-                        //update ip len and csum
-                        nh->ip_tot_len = htons(ip_tot_len+TOA_OPT_SIZE); // toa size 8bytes;
-                        nh->ip_csum = recalc_csum16(nh->ip_csum, htons(ip_tot_len), nh->ip_tot_len);
+                            //update ip len and csum
+                            nh->ip_tot_len = htons(ip_tot_len+TOA_OPT_SIZE); // toa size 8bytes;
+                            nh->ip_csum = recalc_csum16(nh->ip_csum, htons(ip_tot_len), nh->ip_tot_len);
 
-                        //update tcp len and csum
-                        high = (ovs_be32 *)toa_opt;
-                        low = (ovs_be32 *)(toa_opt + 4);
-                        th->tcp_csum = recalc_csum32(th->tcp_csum, 0, *high);
-                        th->tcp_csum = recalc_csum32(th->tcp_csum, 0, *low);
-                        tcp_ctl = th->tcp_ctl;
-                        *tcp_len += TOA_OPT_SIZE/4 << 4;
-                        th->tcp_csum = recalc_csum16(th->tcp_csum, tcp_ctl, th->tcp_ctl);
-                        th->tcp_csum = recalc_csum16(th->tcp_csum, htons(tcp_csum_len), htons(tcp_csum_len + TOA_OPT_SIZE));
+                            //update tcp len and csum
+                            high = (ovs_be32 *)toa_opt;
+                            low = (ovs_be32 *)(toa_opt + 4);
+                            th->tcp_csum = recalc_csum32(th->tcp_csum, 0, *high);
+                            th->tcp_csum = recalc_csum32(th->tcp_csum, 0, *low);
+                            tcp_ctl = th->tcp_ctl;
+                            *tcp_len += TOA_OPT_SIZE/4 << 4;
+                            th->tcp_csum = recalc_csum16(th->tcp_csum, tcp_ctl, th->tcp_ctl);
+                            th->tcp_csum = recalc_csum16(th->tcp_csum, htons(tcp_csum_len), htons(tcp_csum_len + TOA_OPT_SIZE));
 
-                        //only set toa option to sync and first ack packet
-                        if ((tcp_flags & TCP_ACK) == TCP_ACK) {
-                            conn->toa_added = true;
+                            //only set toa option to sync and first ack packet
+                            if ((tcp_flags & TCP_ACK) == TCP_ACK) {
+                                conn->toa_added = true;
+                            }
                         }
                     }
                 }

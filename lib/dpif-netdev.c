@@ -7640,6 +7640,9 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
                                 nl_attr_get_size(b_nest));
                         nat_action_info.nat_action |= NAT_ACTION_POOL;
                         break;
+                    case OVS_NAT_ATTR_TOA:
+                        nat_action_info.nat_action |= NAT_ACTION_TOA;
+                        break;
                     case OVS_NAT_ATTR_UNSPEC:
                     case __OVS_NAT_ATTR_MAX:
                         OVS_NOT_REACHED();

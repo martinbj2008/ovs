@@ -794,6 +794,7 @@ static const struct nl_policy ovs_nat_policy[] = {
     [OVS_NAT_ATTR_ZONE] = { .type = NL_A_U32, .optional = true, },
     [OVS_NAT_ATTR_RS] = { .type = NL_A_UNSPEC, .optional = true, },
     [OVS_NAT_ATTR_POOL] = { .type = NL_A_UNSPEC, .optional = true, },
+    [OVS_NAT_ATTR_TOA] = { .type = NL_A_FLAG, .optional = true, },
 };
 
 struct rs_t {
@@ -856,6 +857,10 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
                 != nl_attr_get_size(a[OVS_NAT_ATTR_IP_MAX])))) {
         ds_put_cstr(ds, "nat(error: IP address sizes do not match)");
         return;
+    }
+
+    if (!a[OVS_NAT_ATTR_SRC] && a[OVS_NAT_ATTR_TOA]) {
+        ds_put_cstr(ds, "nat(error: toa should set with src nat.)");
     }
 
     addr_len = a[OVS_NAT_ATTR_IP_MIN]
@@ -940,6 +945,9 @@ format_odp_ct_nat(struct ds *ds, const struct nlattr *attr)
         }
         if (a[OVS_NAT_ATTR_PROTO_RANDOM]) {
             ds_put_cstr(ds, "random,");
+        }
+        if (a[OVS_NAT_ATTR_TOA]) {
+            ds_put_cstr(ds, "toa,");
         }
         if (a[OVS_NAT_ATTR_ZONE]) {
             ds_put_format(ds, "zone=%"PRIu32, zone);
@@ -1808,6 +1816,7 @@ struct ct_nat_params {
     uint32_t zone;
     char pool_name[33];
     struct nat_rs_pack_t rs_pack;
+    bool toa;
 };
 
 static int
@@ -1956,6 +1965,10 @@ find_end:
                     }
                     goto find_end;
                 }
+                if (ovs_scan_len(s, &n, "toa")) {
+                    p->toa = true;
+                    continue;
+                }
                 return -EINVAL;
             }
 
@@ -1972,6 +1985,9 @@ find_end:
                 return -EINVAL;
             }
             if (p->proto_hash && p->proto_random) {
+                return -EINVAL;
+            }
+            if (!p->snat && p->toa) {
                 return -EINVAL;
             }
             n++;
@@ -2003,6 +2019,14 @@ nl_msg_put_ct_nat(struct ct_nat_params *p, struct ofpbuf *actions)
 
     if (p->dnat) {
         nl_msg_put_flag(actions, OVS_NAT_ATTR_DST);
+    }
+
+    if (!p->snat && p->toa) {
+        goto out;
+    }
+
+    if (p->toa) {
+        nl_msg_put_flag(actions, OVS_NAT_ATTR_TOA);
     }
 
     if (p->rs_pack.count) {

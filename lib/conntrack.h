@@ -77,6 +77,7 @@ enum nat_action_e {
     NAT_ACTION_DST_PORT = 1 << 3,
     NAT_ACTION_RS = 1 << 4,
     NAT_ACTION_POOL = 1 << 5,
+    NAT_ACTION_TOA = 1 << 6,
 };
 
 struct rs_t {
