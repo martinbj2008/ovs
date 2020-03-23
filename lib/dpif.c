@@ -2067,3 +2067,12 @@ dpif_meter_get_offload(struct dpif *dpif, ofproto_meter_id meter_id,
 
     return error;
 }
+
+bool
+is_dpctl_commands_need_generate_ufid(const ovs_u128* ufid)
+{
+    if (ufid->u32[1] == APPCTL_UFID_GEN_MAGIC_CODE)
+        return true;
+
+    return false;
+}

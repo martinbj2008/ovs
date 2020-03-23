@@ -938,6 +938,7 @@ void log_flow_get_message(const struct dpif *,
                           const struct vlog_module *,
                           const struct dpif_flow_get *,
                           int error);
+bool is_dpctl_commands_need_generate_ufid(const ovs_u128* ufid);
 #ifdef  __cplusplus
 }
 #endif

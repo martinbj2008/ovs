@@ -257,7 +257,6 @@ static void dpcls_sort_subtable_vector(struct dpcls *);
 static void dpcls_insert(struct dpcls *, struct dpcls_rule *,
                          const struct netdev_flow_key *mask, bool is_appctl, uint32_t priority);
 static void dpcls_remove(struct dpcls *, struct dpcls_rule *);
-static inline bool is_dpctl_commands_need_generate_ufid(const ovs_u128* ufid);
 /* Set of supported meter flags */
 #define DP_SUPPORTED_METER_FLAGS_MASK \
     (OFPMF13_STATS | OFPMF13_PKTPS | OFPMF13_KBPS | OFPMF13_BURST)
@@ -3556,14 +3555,6 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
     }
     ovs_mutex_unlock(&pmd->flow_mutex);
     return error;
-}
-
-static inline bool is_dpctl_commands_need_generate_ufid(const ovs_u128* ufid)
-{
-    if (ufid->u32[1] == APPCTL_UFID_GEN_MAGIC_CODE)
-        return true;
-
-    return false;
 }
 
 static int

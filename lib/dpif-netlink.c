@@ -2169,18 +2169,70 @@ dpif_netlink_operate_chunks(struct dpif_netlink *dpif, struct dpif_op **ops,
 }
 
 static void
+dpif_netlink_update_ufid(struct dpif *dpif, struct dpif_op *op, ovs_u128 *ufid)
+{
+    switch (op->type) {
+    case DPIF_OP_FLOW_PUT: {
+        struct dpif_flow_put *put = &op->flow_put;
+
+        if (!put->ufid) {
+            dpif_flow_hash(dpif, put->key, put->key_len, ufid);
+            put->ufid = ufid;
+        } else if (is_dpctl_commands_need_generate_ufid(put->ufid)) {
+            dpif_flow_hash_dpctl_commands(dpif, put->key, put->key_len, ufid);
+            put->ufid = ufid;
+        }
+        break;
+    }
+    case DPIF_OP_FLOW_DEL: {
+        struct dpif_flow_del *del = &op->flow_del;
+
+        if (!del->ufid) {
+            dpif_flow_hash(dpif, del->key, del->key_len, ufid);
+            del->ufid = ufid;
+        } else if (is_dpctl_commands_need_generate_ufid(del->ufid)) {
+            dpif_flow_hash_dpctl_commands(dpif, del->key, del->key_len, ufid);
+            del->ufid = ufid;
+        }
+        break;
+    }
+    case DPIF_OP_FLOW_GET: {
+        struct dpif_flow_get *get = &op->flow_get;
+        
+        if (!get->ufid) {
+            dpif_flow_hash(dpif, get->key, get->key_len, ufid);
+            get->ufid = ufid;
+        } else if (is_dpctl_commands_need_generate_ufid(get->ufid)) {
+            dpif_flow_hash_dpctl_commands(dpif, get->key, get->key_len, ufid);
+            get->ufid = ufid;
+        }
+        break;
+    }
+    case DPIF_OP_EXECUTE:
+    default:
+        break;
+    }
+}
+
+static void
 dpif_netlink_operate(struct dpif *dpif_, struct dpif_op **ops, size_t n_ops,
                      enum dpif_offload_type offload_type)
 {
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
     struct dpif_op *new_ops[OPERATE_MAX_OPS];
+    ovs_u128 ufids[OPERATE_MAX_OPS];
     int count = 0;
     int i = 0;
     int err = 0;
+    int j = 0;
 
     if (offload_type == DPIF_OFFLOAD_ALWAYS && !netdev_is_flow_api_enabled()) {
         VLOG_DBG("Invalid offload_type: %d", offload_type);
         return;
+    }
+
+    for (j = 0; j < n_ops; j++) {
+        dpif_netlink_update_ufid(dpif_, ops[j], &ufids[j]);       
     }
 
     if (offload_type != DPIF_OFFLOAD_NEVER && netdev_is_flow_api_enabled()) {
