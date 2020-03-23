@@ -1401,7 +1401,7 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
     }
 
     ofpbuf_init(&actions, 0);
-    if (para.priority == WHITELIST_DPCLS_FLOW_PRI || para.priority == BLACKLIST_SUBTABLE_PRI) {
+    if (para.priority == WHITELIST_DPCLS_FLOW_PRI || para.priority == BLACKLIST_DPCLS_FLOW_PRI) {
         if (para.priority == WHITELIST_DPCLS_FLOW_PRI && strcasecmp(actions_s, "accept")) {
             dpctl_error(dpctl_p, error, "Priority %d is whitelist, only support accept action", WHITELIST_DPCLS_FLOW_PRI);
             goto out_freeactions;
