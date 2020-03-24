@@ -504,6 +504,8 @@ struct dpif_flow_attrs {
 struct dpif_flow_dump_types {
     bool ovs_flows;
     bool netdev_flows;
+    bool offloaded_flows;
+    bool non_offloaded_flows;
 };
 
 struct dpif_flow_extra_para {
@@ -540,7 +542,7 @@ int dpif_flow_put(struct dpif *, enum dpif_flow_put_flags,
                   struct dpif_flow_stats *);
 int dpif_flow_del(struct dpif *,
                   const struct nlattr *key, size_t key_len,
-                  const ovs_u128 *ufid, const unsigned pmd_id, 
+                  const ovs_u128 *ufid, const unsigned pmd_id,
                   const struct dpif_flow_extra_para para,
                   struct dpif_flow_stats *);
 int dpif_flow_get(struct dpif *,

@@ -1133,6 +1133,8 @@ determine_dpif_flow_dump_types(struct dump_types *dump_types,
     dpif_dump_types->ovs_flows = dump_types->ovs || dump_types->non_offloaded;
     dpif_dump_types->netdev_flows = dump_types->tc || dump_types->offloaded
                                     || dump_types->non_offloaded;
+    dpif_dump_types->offloaded_flows = dump_types->offloaded;
+    dpif_dump_types->non_offloaded_flows = dump_types->non_offloaded;
 }
 
 static bool
@@ -1148,7 +1150,7 @@ flow_passes_type_filter(const struct dpif_flow *f,
     if (dump_types->offloaded && f->attrs.offloaded) {
         return true;
     }
-    if (dump_types->non_offloaded && !(f->attrs.offloaded)) {
+    if (dump_types->non_offloaded) {
         return true;
     }
     return false;

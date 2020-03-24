@@ -3714,6 +3714,7 @@ struct dpif_netdev_flow_dump {
     struct cmap_position flow_pos;
     struct dp_netdev_pmd_thread *cur_pmd;
     int status;
+    struct dpif_flow_dump_types *types;
     struct ovs_mutex mutex;
 };
 
@@ -3725,13 +3726,14 @@ dpif_netdev_flow_dump_cast(struct dpif_flow_dump *dump)
 
 static struct dpif_flow_dump *
 dpif_netdev_flow_dump_create(const struct dpif *dpif_, bool terse,
-                             struct dpif_flow_dump_types *types OVS_UNUSED)
+                             struct dpif_flow_dump_types *types)
 {
     struct dpif_netdev_flow_dump *dump;
 
     dump = xzalloc(sizeof *dump);
     dpif_flow_dump_init(&dump->up, dpif_);
     dump->up.terse = terse;
+    dump->types = types;
     ovs_mutex_init(&dump->mutex);
 
     return &dump->up;
@@ -3791,12 +3793,11 @@ dpif_netdev_flow_counter_process(struct dp_netdev_flow *netdev_flow,
         return;
     }
 
-    if (!offload) {
-        atomic_read_relaxed(&netdev_flow->stats.packet_count, &npkts);
-        atomic_read_relaxed(&netdev_flow->stats.byte_count, &nbytes);
-    }else {
-        npkts = pstats->n_packets;
-        nbytes = pstats->n_bytes;
+    atomic_read_relaxed(&netdev_flow->stats.packet_count, &npkts);
+    atomic_read_relaxed(&netdev_flow->stats.byte_count, &nbytes);
+    if (offload) {
+        npkts += pstats->n_packets;
+        nbytes += pstats->n_bytes;
     }
 
     atomic_read_relaxed(&netdev_flow->old_stats.packet_count, &npkts_old);
@@ -3914,9 +3915,14 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
 
         dpif_netdev_flow_counter_process(netdev_flow, dump_offload, &stats);
         if (dump_offload) {
-            f->stats = stats;
             f->attrs.offloaded = true;
             f->attrs.dp_layer = "dpdk";
+            if (dump->types && dump->types->offloaded_flows && !dump->types->non_offloaded_flows) {
+                f->stats = stats;
+            } else if(!dump->types || (dump->types && dump->types->offloaded_flows && dump->types->non_offloaded_flows)) {
+                f->stats.n_bytes += stats.n_bytes;
+                f->stats.n_packets += stats.n_packets;
+            }
         }
     }
 
