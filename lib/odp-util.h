@@ -387,8 +387,6 @@ struct attr_len_tbl {
 #define MIN_DPCLS_FLOW_PRI               0
 #define MIN_DPCTL_DPCLS_FLOW_PRI         1
 #define DEFAULT_DPCTL_DPCLS_FLOW_PRI     6
-#define BLACKLIST_DPCLS_FLOW_PRI         14
-#define WHITELIST_DPCLS_FLOW_PRI         11
 #define MAX_DPCLS_FLOW_PRI               16
 #define APPCTL_UFID_GEN_MAGIC_CODE  0xFFFFFFFF
 #define BLACKLIST_SUBTABLE_PRI    (BLACKLIST_DPCLS_FLOW_PRI -1)
