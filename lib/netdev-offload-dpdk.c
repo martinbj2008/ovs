@@ -1704,7 +1704,8 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         case OVS_ACTION_ATTR_ICMP_PROXY:
         case __OVS_ACTION_ATTR_MAX:
         default:
-            if (info->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION) {
+            if (info->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION ||
+                    info->flow_flags == DPCLS_RULE_FLAGS_MARK) {
                 continue;
             }
             VLOG_INFO("%s: only support output action\n", netdev_get_name(netdev));
@@ -1728,9 +1729,14 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         netdev_offload_dpdk_upcall(&flow_attr, netdev, &mark, &actions, &tbl, UPCALL_TYPE_JUMP_TABLE);
     }
 
-    if (info->flow_flags == DPCLS_RULE_FLAGS_HW_DROP) {
+    if (info->flow_flags == DPCLS_RULE_FLAGS_MARK) {
+        //discard all offload actions before because of upcall action
+        free(actions.actions);
+        actions.actions = NULL;
+        actions.cnt = 0;
         flow_attr.transfer = 0;
-        add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_DROP, NULL);
+        flow_attr.group = 0;
+        rss = netdev_offload_dpdk_add_mark_rss_action(&actions, netdev, &mark);
     }
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_COUNT, &action_count);
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_END, NULL);

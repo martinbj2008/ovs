@@ -1034,8 +1034,8 @@ dpctl_get_flow_flags(uint32_t flags)
             return "skip_hw";
         case DPCLS_RULE_FLAGS_SKIP_HW_ACTION:
             return "skip_hw_act";
-        case DPCLS_RULE_FLAGS_HW_DROP:
-            return "hw_drop";
+        case DPCLS_RULE_FLAGS_MARK:
+            return "mark";
         default:
             return "unkown";
     }

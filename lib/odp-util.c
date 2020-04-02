@@ -8660,10 +8660,9 @@ odp_flags_from_string(const char *s_, uint32_t * pflags)
         else if(!strncasecmp(s, "skip_hw", 7)) {
             *pflags = DPCLS_RULE_FLAGS_SKIP_HW;
             s += 7;
-        }
-        else if(!strncasecmp(s, "hw_drop", 7)) {
-            *pflags = DPCLS_RULE_FLAGS_HW_DROP;
-            s += 7;
+        }else if(!strncasecmp(s, "mark", 4)) {
+            *pflags = DPCLS_RULE_FLAGS_MARK;
+            s += 4;
         }else {
             return -EINVAL;
         }
