@@ -142,6 +142,7 @@ odp_action_len(uint16_t type)
     case OVS_ACTION_ATTR_POP_NSH: return 0;
     case OVS_ACTION_ATTR_CHECK_PKT_LEN: return ATTR_LEN_VARIABLE;
     case OVS_ACTION_ATTR_ICMP_PROXY: return 0;
+    case OVS_ACTION_ATTR_DROP: return sizeof(uint32_t);
 
     case OVS_ACTION_ATTR_UNSPEC:
     case __OVS_ACTION_ATTR_MAX:
@@ -1288,6 +1289,9 @@ format_odp_action(struct ds *ds, const struct nlattr *a,
         break;
     case OVS_ACTION_ATTR_ICMP_PROXY:
         ds_put_cstr(ds, "icmp_proxy");
+        break;
+   case OVS_ACTION_ATTR_DROP:
+        ds_put_cstr(ds, "drop");
         break;
     case OVS_ACTION_ATTR_UNSPEC:
     case __OVS_ACTION_ATTR_MAX:
@@ -2722,6 +2726,7 @@ odp_actions_from_string(const char *s, const struct simap *port_names,
     size_t old_size;
 
     if (!strcasecmp(s, "drop")) {
+        nl_msg_put_u32(actions, OVS_ACTION_ATTR_DROP, 0);
         return 0;
     }
 

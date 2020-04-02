@@ -809,6 +809,7 @@ requires_datapath_assistance(const struct nlattr *a)
     case OVS_ACTION_ATTR_CT_CLEAR:
     case OVS_ACTION_ATTR_CHECK_PKT_LEN:
     case OVS_ACTION_ATTR_ICMP_PROXY:
+    case OVS_ACTION_ATTR_DROP:
         return false;
 
     case OVS_ACTION_ATTR_UNSPEC:
@@ -1053,6 +1054,10 @@ odp_execute_actions(void *dp, struct dp_packet_batch *batch, bool steal,
                 odp_execute_icmp_proxy(packet);
             }
             break;
+        case OVS_ACTION_ATTR_DROP:{
+            dp_packet_delete_batch(batch, steal);
+            return;
+        }
         case OVS_ACTION_ATTR_OUTPUT:
         case OVS_ACTION_ATTR_TUNNEL_PUSH:
         case OVS_ACTION_ATTR_TUNNEL_POP:
