@@ -32,8 +32,14 @@
 
 VLOG_DEFINE_THIS_MODULE(netdev_offload_dpdk);
 
+#define COMMON_OFFLOAD_PORT_TBALE_ID 0
+
+//only config on uplink and downlink port
 enum {
-    OFFLOAD_TABLE_ID_FLOW = 0,
+    OFFLOAD_TABLE_ID_BLACK_LIST = 0,
+    OFFLOAD_TABLE_ID_WHITE_LIST,
+    OFFLOAD_TABLE_ID_FLOW,
+    OFFLOAD_TABLE_ID_RECIRC,
     OFFLOAD_TABLE_ID_UPCALL = 10,
     OFFLOAD_TABLE_ID_MAX,
 };
@@ -41,22 +47,27 @@ enum {
 typedef enum {
     OFFLOAD_RECIRC_UNKOWN = -1,
     OFFLOAD_RECIRC_VXLAN = 0,
-    OFFLOAD_RECIRC_UPCALL,
-    OFFLOAD_RECIRC_CT,
-    OFFLOAD_RECIRC_BLACKLIST,
-    OFFLOAD_RECIRC_WHITELIST,
+    OFFLOAD_RECIRC_JUMP_TABLE,
+    OFFLOAD_RECIRC_TYPE_MAX
 }RECIRC_TYPE;
+
+typedef enum {
+    OFFLOAD_JUMP_TABLE_UPCALL = 0,
+    OFFLOAD_JUMP_TABLE_COMMON,
+    OFFLOAD_JUMP_TABLE_UNKOWN
+}JUMP_TABLE_TYPE;
 
 #define OFFLOAD_TABLE_MIN_PRIORITY 3
 #define OFFLOAD_TABLE_MAX_PRIORITY 0
 
-#define GET_RECIRC_TYPE_BY_ID(id) ((id >> 16) & 0xF)
-#define RECIRC_ID_SPEC_PATTERN 0xFF000000
-#define RECIRC_ID_UPCALL_PATTERN (RECIRC_ID_SPEC_PATTERN | (OFFLOAD_RECIRC_UPCALL << 16))
-#define RECIRC_ID_VXLAN_PATTERN (RECIRC_ID_SPEC_PATTERN | (OFFLOAD_RECIRC_VXLAN << 16))
-#define IS_SPEC_RECIRC_ID(id) ((id & RECIRC_ID_SPEC_PATTERN) == RECIRC_ID_SPEC_PATTERN)
-#define IS_VXLAN_RECIRC_ID(id) ((id & RECIRC_ID_VXLAN_PATTERN) == RECIRC_ID_VXLAN_PATTERN)
-#define IS_UPCALL_RECIRC_ID(id) ((id & RECIRC_ID_UPCALL_PATTERN) == RECIRC_ID_UPCALL_PATTERN)
+#define RECIRC_ID_SPEC_PATTERN 0xFF00
+#define RECIRC_ID_JUMP_TABLE_PATTERN (RECIRC_ID_SPEC_PATTERN | OFFLOAD_RECIRC_JUMP_TABLE)
+#define RECIRC_ID_VXLAN_PATTERN (RECIRC_ID_SPEC_PATTERN | OFFLOAD_RECIRC_VXLAN)
+#define IS_SPEC_RECIRC_ID(id) ((id>>24) == 0xFF)
+#define IS_VXLAN_RECIRC_ID(id) ((id >> 16) == RECIRC_ID_VXLAN_PATTERN)
+#define IS_JUMP_TABLE_RECIRC_ID(id) ((id >> 16) == RECIRC_ID_JUMP_TABLE_PATTERN)
+
+#define GET_RECIRC_JUMP_TABLE_ID(id) (id & 0xf)
 
 bool soft_hard_compatible_flag = false;
 enum {
@@ -1005,22 +1016,21 @@ static int
 netdev_offload_jump_group_action(
         struct rte_flow_attr * flow_attr,
         struct flow_actions *pactions,
-        RECIRC_TYPE type,
+        JUMP_TABLE_TYPE type,
+        const uint32_t* recirc_id,
         struct rte_flow_action_jump *ptbl)
 {
     int ret = 0;
     uint32_t dst_table = 0;
 
     switch (type) {
-        case OFFLOAD_RECIRC_UPCALL:
-            flow_attr->group = OFFLOAD_TABLE_ID_FLOW;
+        case OFFLOAD_JUMP_TABLE_UPCALL:
             dst_table = OFFLOAD_TABLE_ID_UPCALL;
             break;
-        case OFFLOAD_RECIRC_WHITELIST:
-        case OFFLOAD_RECIRC_BLACKLIST:
-        case OFFLOAD_RECIRC_VXLAN:
-        case OFFLOAD_RECIRC_CT:
-        case OFFLOAD_RECIRC_UNKOWN:
+        case OFFLOAD_JUMP_TABLE_COMMON:
+            dst_table = GET_RECIRC_JUMP_TABLE_ID(*recirc_id);
+            break;
+        case OFFLOAD_JUMP_TABLE_UNKOWN:
             ret = -1;
             VLOG_INFO("Unsupport recirc offload type: %d", type);
             break;
@@ -1028,6 +1038,7 @@ netdev_offload_jump_group_action(
 
     if (!ret && ptbl) {
         ptbl->group = dst_table;
+        VLOG_INFO("****** JUMP TABLE: SRC %d, DST %d", flow_attr->group, dst_table);
         add_flow_action(pactions, RTE_FLOW_ACTION_TYPE_JUMP, ptbl);
     }
 
@@ -1284,7 +1295,7 @@ netdev_offload_dpdk_upcall(
         return rss;
     }
 
-    netdev_offload_jump_group_action(flow_attr, pactions, OFFLOAD_RECIRC_UPCALL, ptbl);
+    netdev_offload_jump_group_action(flow_attr, pactions, OFFLOAD_JUMP_TABLE_UPCALL, NULL, ptbl);
     return NULL;
 }
 
@@ -1297,7 +1308,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              struct offload_info *info)
 {
     struct rte_flow_attr flow_attr = {
-        .group = OFFLOAD_TABLE_ID_FLOW,
+        .group = COMMON_OFFLOAD_PORT_TBALE_ID,
         .priority = OFFLOAD_TABLE_MIN_PRIORITY,
         .ingress = 1,
         .egress = 0,
@@ -1592,8 +1603,14 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     const struct ovs_action_push_vlan *vlan = NULL;
     struct rte_flow_action_jump tbl;
 
-    if (vxlan_match_flag && !(IS_UPCALL_RECIRC_ID(match->flow.recirc_id))) {
+    if (vxlan_match_flag) {
         add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
+    }
+
+    if (IS_SPEC_RECIRC_ID(match->flow.recirc_id)
+            && IS_JUMP_TABLE_RECIRC_ID(match->flow.recirc_id)) {
+        //if match key has 0xFF01000A pattern, then we will install flow in A table in HW
+        flow_attr.group = GET_RECIRC_JUMP_TABLE_ID(match->flow.recirc_id);
     }
 
     NL_ATTR_FOR_EACH_UNSAFE (a, left, nl_actions, actions_len) {
@@ -1601,7 +1618,8 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         switch ((enum ovs_action_attr) type) {
         case OVS_ACTION_ATTR_OUTPUT: {
             odp_port_t odp_port = nl_attr_get_odp_port(a);
-            ret = netdev_offload_output_action(netdev, info->dpif_class, &actions, &port_id, &out_put_action_cnt, odp_port, vxlan_encap_flag);
+            ret = netdev_offload_output_action(netdev, info->dpif_class, &actions, &port_id,
+                    &out_put_action_cnt, odp_port, vxlan_encap_flag);
             if (ret == -1) {
                 continue;
             }
@@ -1625,12 +1643,16 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                 continue;
             }
 
-            if (IS_UPCALL_RECIRC_ID(*recirc_id)) {
-                netdev_offload_jump_group_action(&flow_attr, &actions, OFFLOAD_RECIRC_UPCALL, &tbl);
+            if (IS_VXLAN_RECIRC_ID(*recirc_id)) {
+                netdev_offload_output_action(netdev, info->dpif_class, &actions,
+                        &port_id, &out_put_action_cnt, 0, true);
+            } else if (IS_JUMP_TABLE_RECIRC_ID(*recirc_id)) {
+                netdev_offload_jump_group_action(&flow_attr, &actions,
+                        OFFLOAD_JUMP_TABLE_COMMON, recirc_id, &tbl);
+            } else {
+                VLOG_INFO("Unsupported this recirc id action: %d", ((recirc_id==NULL) ? -1: *recirc_id));
                 continue;
             }
-
-            netdev_offload_output_action(netdev, info->dpif_class, &actions, &port_id, &out_put_action_cnt, 0, true);
             break;
         }
         case OVS_ACTION_ATTR_TUNNEL_PUSH: {
@@ -1738,6 +1760,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         flow_attr.group = 0;
         rss = netdev_offload_dpdk_add_mark_rss_action(&actions, netdev, &mark);
     }
+
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_COUNT, &action_count);
     add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_END, NULL);
 

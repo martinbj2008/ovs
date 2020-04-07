@@ -97,8 +97,8 @@ DEFINE_STATIC_PER_THREAD_DATA(uint32_t, recirc_depth, 0)
 /* Use instant packet send by default. */
 #define DEFAULT_TX_FLUSH_INTERVAL 0
 
-#define RECIRC_ID_SPEC_PATTERN 0xFF000000
-#define IS_SPEC_RECIRC_ID(id) ((id & RECIRC_ID_SPEC_PATTERN) == RECIRC_ID_SPEC_PATTERN)
+#define RECIRC_ID_SPEC_PATTERN 0xFF00
+#define IS_SPEC_RECIRC_ID(id) ((id >> 16) == RECIRC_ID_SPEC_PATTERN)
 #define GET_INPORT_ID_BY_SPEC_RECIRC_ID(id) (id & 0xFF)
 
 /* Configuration parameters. */
