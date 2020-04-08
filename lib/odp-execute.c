@@ -790,6 +790,7 @@ requires_datapath_assistance(const struct nlattr *a)
     case OVS_ACTION_ATTR_RECIRC:
     case OVS_ACTION_ATTR_CT:
     case OVS_ACTION_ATTR_METER:
+    case OVS_ACTION_ATTR_COUNTER:
         return true;
 
     case OVS_ACTION_ATTR_SET:
@@ -1065,6 +1066,7 @@ odp_execute_actions(void *dp, struct dp_packet_batch *batch, bool steal,
         case OVS_ACTION_ATTR_RECIRC:
         case OVS_ACTION_ATTR_CT:
         case OVS_ACTION_ATTR_UNSPEC:
+        case OVS_ACTION_ATTR_COUNTER:
         case __OVS_ACTION_ATTR_MAX:
             OVS_NOT_REACHED();
         }

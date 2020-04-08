@@ -1708,6 +1708,8 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         case OVS_ACTION_ATTR_DROP:
             add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_DROP, NULL);
             break;
+        case OVS_ACTION_ATTR_COUNTER:
+            continue;
         case OVS_ACTION_ATTR_CLONE:
         case OVS_ACTION_ATTR_HASH:
         case OVS_ACTION_ATTR_PUSH_MPLS:

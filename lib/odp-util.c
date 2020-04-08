@@ -143,6 +143,7 @@ odp_action_len(uint16_t type)
     case OVS_ACTION_ATTR_CHECK_PKT_LEN: return ATTR_LEN_VARIABLE;
     case OVS_ACTION_ATTR_ICMP_PROXY: return 0;
     case OVS_ACTION_ATTR_DROP: return sizeof(uint32_t);
+    case OVS_ACTION_ATTR_COUNTER: return sizeof(uint32_t);
 
     case OVS_ACTION_ATTR_UNSPEC:
     case __OVS_ACTION_ATTR_MAX:
@@ -1292,6 +1293,9 @@ format_odp_action(struct ds *ds, const struct nlattr *a,
         break;
    case OVS_ACTION_ATTR_DROP:
         ds_put_cstr(ds, "drop");
+        break;
+   case OVS_ACTION_ATTR_COUNTER:
+        ds_put_format(ds, "counter(%"PRIu32")", nl_attr_get_u32(a));
         break;
     case OVS_ACTION_ATTR_UNSPEC:
     case __OVS_ACTION_ATTR_MAX:
@@ -2686,6 +2690,16 @@ parse_odp_action__(struct parse_odp_context *context, const char *s,
         if (!strncmp(s, "icmp_proxy", 10)) {
             nl_msg_put_flag(actions, OVS_ACTION_ATTR_ICMP_PROXY);
             return 10;
+        }
+    }
+
+    {
+        unsigned long long int counter_id;
+        int n = -1;
+
+        if (sscanf(s, "counter(%lli)%n", &counter_id, &n) > 0 && n > 0) {
+            nl_msg_put_u32(actions, OVS_ACTION_ATTR_COUNTER, counter_id);
+            return n;
         }
     }
 

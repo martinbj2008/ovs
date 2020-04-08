@@ -1303,6 +1303,7 @@ dpif_execute_helper_cb(void *aux_, struct dp_packet_batch *packets_,
     case OVS_ACTION_ATTR_CHECK_PKT_LEN:
     case OVS_ACTION_ATTR_DROP:
     case OVS_ACTION_ATTR_ICMP_PROXY:
+    case OVS_ACTION_ATTR_COUNTER:
     case __OVS_ACTION_ATTR_MAX:
         OVS_NOT_REACHED();
     }

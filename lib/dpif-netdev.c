@@ -3358,6 +3358,28 @@ dp_netdev_get_mega_ufid(const struct match *match, ovs_u128 *mega_ufid)
     dpif_flow_hash(NULL, &masked_flow, sizeof(struct flow), mega_ufid);
 }
 
+static int
+dp_netdev_counter_actions_cnt(const struct nlattr *actions, size_t actions_len, uint32_t *pcnt)
+{
+    const struct nlattr *a;
+    unsigned int left;
+    int type = 0, cnt = 0;
+
+    if (!actions_len) {
+        return 0;
+    }
+
+    NL_ATTR_FOR_EACH_UNSAFE (a, left, actions, actions_len) {
+        type = nl_attr_type(a);
+        if (type == OVS_ACTION_ATTR_COUNTER) {
+            pcnt[cnt] = nl_attr_get_u32(a);
+            cnt ++;
+        }
+    }
+
+    return cnt;
+}
+
 static struct dp_netdev_flow *
 dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
                    struct match *match, const ovs_u128 *ufid,
@@ -3368,6 +3390,8 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
     struct dp_netdev_flow *flow;
     struct netdev_flow_key mask;
     struct dpcls *cls;
+    uint32_t cnt_id = 0;
+    int counter_cnt = 0;
 
     /* Make sure in_port is exact matched before we read it. */
     ovs_assert(match->wc.masks.in_port.odp_port == ODPP_NONE);
@@ -3406,6 +3430,12 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
     flow->counter_id = para.counter_id;
     if (para.counter_id) {
         dp_counter_ref(para.counter_id);
+    }else {
+        counter_cnt = dp_netdev_counter_actions_cnt(actions, actions_len, &cnt_id);
+        if (counter_cnt && cnt_id != 0) {
+            dp_counter_ref(cnt_id);
+            flow->counter_id = cnt_id;
+        }
     }
     dp_netdev_get_mega_ufid(match, CONST_CAST(ovs_u128 *, &flow->mega_ufid));
     netdev_flow_key_init_masked(&flow->cr.flow, &match->flow, &mask);
@@ -3780,19 +3810,15 @@ dpif_netdev_flow_counter_process(struct dp_netdev_flow *netdev_flow,
 {
     uint64_t npkts, nbytes, npkts_old, nbytes_old;
 
-    if (netdev_flow->counter_id == 0 || (offload && netdev_flow->pmd_id != NON_PMD_CORE_ID)) {
-        return;
-    }
-
-    atomic_read_relaxed(&netdev_flow->stats.packet_count, &npkts);
-    atomic_read_relaxed(&netdev_flow->stats.byte_count, &nbytes);
-    if (offload) {
-        npkts += pstats->n_packets;
-        nbytes += pstats->n_bytes;
+    if (netdev_flow->counter_id == 0 || !offload || (offload && netdev_flow->pmd_id != NON_PMD_CORE_ID)) {
+        return;  //only statistic offload flows
     }
 
     atomic_read_relaxed(&netdev_flow->old_stats.packet_count, &npkts_old);
     atomic_read_relaxed(&netdev_flow->old_stats.byte_count, &nbytes_old);
+    npkts = pstats->n_packets;
+    nbytes = pstats->n_bytes;
+
     if (npkts > npkts_old && nbytes > nbytes_old) {
         dp_counter_push(netdev_flow->counter_id, netdev_flow->pmd_id,
                 npkts-npkts_old, nbytes-nbytes_old, DP_COUNTER_PMD_STATS_TYPE_ADD);
@@ -7355,6 +7381,21 @@ dp_execute_userspace_action(struct dp_netdev_pmd_thread *pmd,
 }
 
 static void
+dp_netdev_counter(int pmd_id, struct dp_packet_batch *packets_,
+                  uint32_t counter_id)
+{
+    const size_t cnt = dp_packet_batch_size(packets_);
+    uint32_t bytes = 0;
+    struct dp_packet *packet;
+
+    DP_PACKET_BATCH_FOR_EACH (i, packet, packets_) {
+        bytes += dp_packet_size(packet);
+    }
+
+    dp_counter_push(counter_id, pmd_id, cnt, bytes, DP_COUNTER_PMD_STATS_TYPE_ADD);
+}
+
+static void
 dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
               const struct nlattr *a, bool should_steal)
     OVS_NO_THREAD_SAFETY_ANALYSIS
@@ -7675,6 +7716,10 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
     case OVS_ACTION_ATTR_METER:
         dp_netdev_run_meter(pmd->dp, packets_, nl_attr_get_u32(a),
                             pmd->ctx.now);
+        break;
+
+    case OVS_ACTION_ATTR_COUNTER:
+        dp_netdev_counter(pmd->core_id, packets_, nl_attr_get_u32(a));
         break;
 
     case OVS_ACTION_ATTR_PUSH_VLAN:
