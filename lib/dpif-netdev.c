@@ -3541,8 +3541,10 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
         }
     } else {
         if (put->flags & DPIF_FP_MODIFY) {
+            uint32_t old_flags = netdev_flow->flow_flags;
             struct dp_netdev_actions *new_actions;
             struct dp_netdev_actions *old_actions;
+            unsigned long long n;
 
             new_actions = dp_netdev_actions_create(put->actions,
                                                    put->actions_len);
@@ -3550,8 +3552,26 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
             old_actions = dp_netdev_flow_get_actions(netdev_flow);
             ovsrcu_set(&netdev_flow->actions, new_actions);
 
-            queue_netdev_flow_put(pmd, netdev_flow, match,
+            if (put->para.flow_flags == DPCLS_RULE_FLAGS_SKIP_HW) {
+                netdev_flow->flow_flags = put->para.flow_flags;
+                if (old_flags != DPCLS_RULE_FLAGS_SKIP_HW) {
+                    queue_netdev_flow_del(pmd, netdev_flow);
+
+                    atomic_read_relaxed(&netdev_flow->old_stats.packet_count, &n);
+                    non_atomic_ullong_add(&netdev_flow->stats.packet_count, n);
+                    atomic_read_relaxed(&netdev_flow->old_stats.byte_count, &n);
+                    non_atomic_ullong_add(&netdev_flow->stats.byte_count, n);
+
+                    atomic_store_relaxed(&netdev_flow->old_stats.packet_count, 0);
+                    atomic_store_relaxed(&netdev_flow->old_stats.byte_count, 0);
+                }
+            } else {
+                netdev_flow->flow_flags = put->para.flow_flags;
+                atomic_store_relaxed(&netdev_flow->old_stats.packet_count, 0);
+                atomic_store_relaxed(&netdev_flow->old_stats.byte_count, 0);
+                queue_netdev_flow_put(pmd, netdev_flow, match,
                                   put->actions, put->actions_len);
+            }
 
             if (stats) {
                 get_dpif_flow_stats(netdev_flow, stats);
