@@ -3555,6 +3555,7 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
             if (put->para.flow_flags == DPCLS_RULE_FLAGS_SKIP_HW) {
                 netdev_flow->flow_flags = put->para.flow_flags;
                 if (old_flags != DPCLS_RULE_FLAGS_SKIP_HW) {
+                    queue_netdev_flow_del(pmd, netdev_flow);
 
                     atomic_read_relaxed(&netdev_flow->old_stats.packet_count, &n);
                     non_atomic_ullong_add(&netdev_flow->stats.packet_count, n);
