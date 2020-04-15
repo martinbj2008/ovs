@@ -638,46 +638,59 @@ struct dpdk_meter_offload {
     struct rte_flow_action_meter mc;
 };
 
-static void dpdk_meter_destroy(void *data)
+static int dpdk_meter_destroy(void *data)
 {
     struct dpdk_meter_offload *dmo = data;
     struct rte_mtr_error error;
+    int ret;
 
-    if (dmo) {
-        rte_mtr_meter_profile_delete(dmo->port_id,
-                                     dmo->mc.mtr_id,
-                                     &error);
-        rte_mtr_destroy(dmo->port_id,
-                        dmo->mc.mtr_id,
-                        &error);
-        free(dmo);
+    if (!dmo)
+        return 0;
+
+    ret = rte_mtr_destroy(dmo->port_id, dmo->mc.mtr_id, &error);
+    if (ret) {
+        VLOG_ERR("rte_mtr_destroy invoked failed: meter-id %d, msg: %s\n",
+                 dmo->mc.mtr_id, error.message);
+        return ret;
     }
+    
+    ret = rte_mtr_meter_profile_delete(dmo->port_id, dmo->mc.mtr_id,
+                                       &error);
+    if (ret) {
+        VLOG_ERR("rte_mtr_meter_profile_delete invoked failed: meter-id %d, msg: %s\n",
+                 dmo->mc.mtr_id, error.message);
+        return ret;
+    }
+
+    free(dmo);
+
+    return 0;
 }
 
 #define DPDK_METER_UPATE_UP 65536
 
-static void dpdk_meter_update(void *priv_data, void *config)
+static int dpdk_meter_update(void *priv_data, void *config)
 {
     struct dpdk_meter_offload *dmo = priv_data;
     struct rte_mtr_meter_profile mp;
     struct rte_mtr_error mtr_error;
-    uint32_t mp_id, new_mp_id;
+    uint32_t new_mp_id;
     uint32_t max_rate;
     uint32_t ret;
 
     if (!priv_data || !config) {
-        return;
+        return -1;
     }
 
     max_rate = ofputil_meter_config_max_rate(config);
     if (dmo->max_rate == max_rate) {
-        return;
+        return 0;
     }
 
     memset(&mp, 0, sizeof(struct rte_mtr_meter_profile));
     mp.alg = RTE_MTR_SRTCM_RFC2697;
-    mp.srtcm_rfc2697.cir = max_rate *1024 /8;
-    mp.srtcm_rfc2697.cbs = max_rate *1024 /8;
+    mp.srtcm_rfc2697.cir = max_rate *1024LLU /8;
+    mp.srtcm_rfc2697.cbs = max_rate *1024LLU /8;
     mp.srtcm_rfc2697.ebs = 0;
 
     if (dmo->mp_id < DPDK_METER_UPATE_UP) {
@@ -689,29 +702,36 @@ static void dpdk_meter_update(void *priv_data, void *config)
     ret = rte_mtr_meter_profile_add(dmo->port_id, new_mp_id,
                                     &mp, &mtr_error);
     if (ret) {
-        VLOG_ERR("rte_mtr_meter_profile_add fail: err_type: %d err_msg: %s\n",
-                 mtr_error.type, mtr_error.message);
-        return;
+        VLOG_ERR("rte_mtr_meter_profile_add failed: %s\n", mtr_error.message);
+        return ret;
     }
 
     ret = rte_mtr_meter_profile_update(dmo->port_id, dmo->mc.mtr_id,
                                        new_mp_id, &mtr_error);
     if (ret) {
-        VLOG_ERR("rte_mtr_meter_profile_update fail: err_type: %d err_msg: %s\n",
-                 mtr_error.type, mtr_error.message);
-        mp_id = new_mp_id;
-        goto out;
+        VLOG_ERR("rte_mtr_meter_profile_update fail: %s\n", mtr_error.message);
+        goto out_err;
     }
 
-    mp_id = dmo->mp_id;
+    ret = rte_mtr_meter_profile_delete(dmo->port_id, dmo->mp_id, &mtr_error);
+    if (ret) {
+        VLOG_ERR("rte_mtr_meter_profile_delete old failed, that should not occur:"
+                 "%s\n", mtr_error.message);
+    }
+    
     dmo->mp_id = new_mp_id;
     dmo->max_rate = max_rate;
-out:
-    ret = rte_mtr_meter_profile_delete(dmo->port_id, mp_id, &mtr_error);
+
+    return 0;
+
+out_err:
+    ret = rte_mtr_meter_profile_delete(dmo->port_id, new_mp_id, &mtr_error);
     if (ret) {
-        VLOG_ERR("rte_mtr_meter_profile_update fail: err_type: %d err_msg: %s\n",
-                 mtr_error.type, mtr_error.message);
+        VLOG_ERR("rte_mtr_meter_profile_delete new fail: %s\n",
+                 mtr_error.message);
     }
+
+    return ret;
 }
 
 static struct netdev_offload_meter_api dpdk_meter_offload_api = {

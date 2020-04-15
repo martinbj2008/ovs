@@ -1829,7 +1829,7 @@ struct ofproto_class {
 
     /* Deletes a meter, making the 'ofproto_meter_id' invalid for any
      * further calls. */
-    void (*meter_del)(struct ofproto *, ofproto_meter_id);
+    int (*meter_del)(struct ofproto *, ofproto_meter_id);
 
 
 /* ## -------------------- ## */

@@ -89,8 +89,8 @@ struct netdev_flow_api {
 };
 
 struct netdev_offload_meter_api {
-    void (*meter_destroy)(void *);
-    void (*meter_update)(void *, void *);
+    int (*meter_destroy)(void *);
+    int (*meter_update)(void *, void *);
 };
 
 struct netdev_offload_meter {

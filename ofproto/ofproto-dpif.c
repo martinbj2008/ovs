@@ -6061,17 +6061,22 @@ struct free_meter_id_args {
     ofproto_meter_id meter_id;
 };
 
-static void
+static int
 free_meter_id(struct free_meter_id_args *args)
 {
     struct ofproto_dpif *ofproto = args->ofproto;
+    int ret;
 
-    dpif_meter_del(ofproto->backer->dpif, args->meter_id, NULL, 0);
+    ret = dpif_meter_del(ofproto->backer->dpif, args->meter_id, NULL, 0);
+    if (ret)
+        return ret;
+
     id_pool_free_id(ofproto->backer->meter_ids, args->meter_id.uint32);
     free(args);
+    return 0;
 }
 
-static void
+static int
 meter_del(struct ofproto *ofproto_, ofproto_meter_id meter_id)
 {
     struct free_meter_id_args *arg = xmalloc(sizeof *arg);
@@ -6085,7 +6090,7 @@ meter_del(struct ofproto *ofproto_, ofproto_meter_id meter_id)
      * upcall translation or flow revalidation can complete. */
     arg->ofproto = ofproto_dpif_cast(ofproto_);
     arg->meter_id = meter_id;
-    ovsrcu_postpone(free_meter_id, arg);
+    return free_meter_id(arg);
 }
 
 const struct ofproto_class ofproto_dpif_class = {

@@ -6648,11 +6648,12 @@ meter_create(const struct ofputil_meter_config *config,
     return meter;
 }
 
-static void
+static int
 meter_destroy(struct ofproto *ofproto, struct meter *meter)
     OVS_REQUIRES(ofproto_mutex)
 {
     uint32_t *upcall_meter_ptr;
+
     upcall_meter_ptr = ofproto_upcall_meter_ptr(ofproto, meter->id);
     if (upcall_meter_ptr) {
         *upcall_meter_ptr = UINT32_MAX;
@@ -6669,9 +6670,7 @@ meter_destroy(struct ofproto *ofproto, struct meter *meter)
         delete_flows__(&rules, OFPRR_METER_DELETE, NULL);
     }
 
-    ofproto->ofproto_class->meter_del(ofproto, meter->provider_meter_id);
-    free(meter->bands);
-    free(meter);
+    return ofproto->ofproto_class->meter_del(ofproto, meter->provider_meter_id);
 }
 
 static void
@@ -6681,8 +6680,12 @@ meter_delete(struct ofproto *ofproto, uint32_t meter_id)
     struct meter *meter = ofproto_get_meter(ofproto, meter_id);
 
     if (meter) {
+        if (meter_destroy(ofproto, meter))
+            return;
+
         hmap_remove(&ofproto->meters, &meter->node);
-        meter_destroy(ofproto, meter);
+        free(meter->bands);
+        free(meter);
     }
 }
 
@@ -6693,8 +6696,11 @@ meter_delete_all(struct ofproto *ofproto)
     struct meter *meter, *next;
 
     HMAP_FOR_EACH_SAFE (meter, next, node, &ofproto->meters) {
+        if (meter_destroy(ofproto, meter))
+            return;
         hmap_remove(&ofproto->meters, &meter->node);
-        meter_destroy(ofproto, meter);
+        free(meter->bands);
+        free(meter);
     }
 }
 

@@ -1727,21 +1727,32 @@ dp_netdev_destroy_upcall_lock(struct dp_netdev *dp)
     fat_rwlock_destroy(&dp->upcall_rwlock);
 }
 
+static int
+dp_delete_meter_offload(struct dp_netdev *dp, uint32_t meter_id)
+                        OVS_REQUIRES(dp->meter_locks[meter_id % N_METER_LOCKS])
+{
+    struct netdev_offload_meter *nom;
+    int ret;
+
+    if (dp->meters[meter_id] && dp->meters[meter_id]->offload) {
+
+        nom = dp->meters[meter_id]->offload;
+        ret = nom->meter_ops->meter_destroy(nom->priv_data);
+        if (ret)
+            return ret;
+
+        free(nom);
+        dp->meters[meter_id]->offload = NULL;
+    }
+
+    return 0;
+}
+
 static void
 dp_delete_meter(struct dp_netdev *dp, uint32_t meter_id)
-    OVS_REQUIRES(dp->meter_locks[meter_id % N_METER_LOCKS])
+                OVS_REQUIRES(dp->meter_locks[meter_id % N_METER_LOCKS])
 {
     if (dp->meters[meter_id]) {
-        if (dp->meters[meter_id]->offload) {
-            struct netdev_offload_meter *nom;
-
-            nom = dp->meters[meter_id]->offload;
-            nom->meter_ops->meter_destroy(nom->priv_data);
-
-            free(nom);
-            dp->meters[meter_id]->offload = NULL;
-        }
-
         free(dp->meters[meter_id]);
         dp->meters[meter_id] = NULL;
     }
@@ -1788,6 +1799,7 @@ dp_netdev_free(struct dp_netdev *dp)
 
     for (i = 0; i < MAX_METERS; ++i) {
         meter_lock(dp, i);
+        dp_delete_meter_offload(dp, i);
         dp_delete_meter(dp, i);
         meter_unlock(dp, i);
     }
@@ -6043,6 +6055,7 @@ dpif_netdev_meter_set(struct dpif *dpif, ofproto_meter_id meter_id,
     struct dp_netdev *dp = get_dp_netdev(dpif);
     uint32_t mid = meter_id.uint32;
     struct dp_meter *meter;
+    int ret;
     int i;
 
     if (mid >= MAX_METERS) {
@@ -6102,20 +6115,32 @@ dpif_netdev_meter_set(struct dpif *dpif, ofproto_meter_id meter_id,
     VLOG_INFO("SET METERID: %d\n", mid);
 
     meter_lock(dp, mid);
+
+    /* That means update */
     if (dp->meters[mid] && dp->meters[mid]->offload) {
         struct netdev_offload_meter *nom;
 
         nom = dp->meters[mid]->offload;
-        nom->meter_ops->meter_update(nom->priv_data, config);
+        ret = nom->meter_ops->meter_update(nom->priv_data, config);
+        if (ret) {
+            VLOG_ERR("update the meter offload failed: meter-id %d\n",
+                    mid);
+            goto out_err;
+        }
         meter->offload = nom;
         dp->meters[mid]->offload = NULL;
     }
-
+    
     dp_delete_meter(dp, mid); /* Free existing meter, if any */
     dp->meters[mid] = meter;
     meter_unlock(dp, mid);
 
     return 0;
+
+out_err:
+    meter_unlock(dp, mid);
+    free(meter);
+    return ret;
 }
 
 static int
@@ -6169,6 +6194,14 @@ dpif_netdev_meter_del(struct dpif *dpif,
         uint32_t meter_id = meter_id_.uint32;
 
         meter_lock(dp, meter_id);
+        error = dp_delete_meter_offload(dp, meter_id);
+        if (error) {
+            meter_unlock(dp, meter_id);
+            VLOG_INFO("%s: dp_delete_meter_offload invoked failed: meter-id: %d, ret: %d\n",
+                      __func__, meter_id, error);
+            return error;
+        }
+
         dp_delete_meter(dp, meter_id);
         meter_unlock(dp, meter_id);
     }
