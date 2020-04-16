@@ -3518,6 +3518,32 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
     return flow;
 }
 
+static void
+try_queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
+                          struct dp_netdev_flow *netdev_flow)
+{
+    odp_port_t odp_port = netdev_flow->flow.in_port.odp_port;
+    struct dp_netdev *dp = pmd->dp;
+    struct netdev_flow_dump dump;
+    struct dp_netdev_port *port;
+    struct dpif_flow_stats stats;
+    bool offload;
+
+    ovs_mutex_lock(&dp->port_mutex);
+    port = dp_netdev_lookup_port(dp, odp_port);
+    ovs_mutex_unlock(&dp->port_mutex);
+
+    if (port == NULL)
+        return;
+
+    dump.netdev = port->netdev;
+    offload = netdev_flow_dump_next(&dump, NULL, NULL, &stats, NULL,
+                                    CONST_CAST(ovs_u128 *, &netdev_flow->mega_ufid),
+                                    NULL, NULL);
+    if (offload)
+        queue_netdev_flow_del(pmd, netdev_flow);
+}
+
 static int
 flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
                 struct netdev_flow_key *key,
@@ -3567,7 +3593,8 @@ flow_put_on_pmd(struct dp_netdev_pmd_thread *pmd,
             if (put->para.flow_flags == DPCLS_RULE_FLAGS_SKIP_HW) {
                 netdev_flow->flow_flags = put->para.flow_flags;
                 if (old_flags != DPCLS_RULE_FLAGS_SKIP_HW) {
-                    queue_netdev_flow_del(pmd, netdev_flow);
+
+                    try_queue_netdev_flow_del(pmd, netdev_flow);
 
                     atomic_read_relaxed(&netdev_flow->old_stats.packet_count, &n);
                     non_atomic_ullong_add(&netdev_flow->stats.packet_count, n);
