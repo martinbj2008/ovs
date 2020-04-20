@@ -1532,12 +1532,6 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         goto out;
     }
 
-    if ((match->wc.masks.tp_src && match->wc.masks.tp_src != OVS_BE16_MAX) ||
-        (match->wc.masks.tp_dst && match->wc.masks.tp_dst != OVS_BE16_MAX)) {
-        ret = -1;
-        goto out;
-    }
-
     switch (proto) {
     case IPPROTO_TCP:
         spec.tcp.hdr.src_port  = match->flow.tp_src;
