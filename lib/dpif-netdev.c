@@ -80,6 +80,7 @@
 #include "util.h"
 #include "uuid.h"
 #include "counter.h"
+#include "conntrack-offload.h"
 
 VLOG_DEFINE_THIS_MODULE(dpif_netdev);
 
@@ -6241,7 +6242,7 @@ dpif_netdev_meter_set(struct dpif *dpif, ofproto_meter_id meter_id,
         meter->offload = nom;
         dp->meters[mid]->offload = NULL;
     }
-    
+
     dp_delete_meter(dp, mid); /* Free existing meter, if any */
     dp->meters[mid] = meter;
     meter_unlock(dp, mid);
@@ -8617,3 +8618,238 @@ dpcls_lookup(struct dpcls *cls, const struct netdev_flow_key *keys[],
     return false;
 }
 
+bool
+conntrack_nat_offload_is_enable(void) {
+    return netdev_is_flow_api_enabled();
+}
+
+uint32_t
+conntrack_nat_offload_flow_hash(const ovs_u128 *ufid) {
+    return dp_netdev_flow_hash(ufid);
+}
+
+static void
+set_zone_to_dst_eth(struct ovs_key_ethernet *key, struct ovs_key_ethernet *mask,
+                    uint32_t zone)
+{
+    struct eth_addr dst = ETH_ADDR_C(00, 00, 00, 00, 00, 00);
+    dst.ea[2] = zone >> 24;
+    dst.ea[3] = zone >> 16 & 0xff;
+    dst.ea[4] = zone >> 8 & 0xff;
+    dst.ea[5] = zone & 0xff;
+    key->eth_dst = dst;
+    struct eth_addr dst_mask = ETH_ADDR_C(ff, ff, ff, ff, ff, ff);
+    mask->eth_dst = dst_mask;
+}
+
+#define CT_OFFLOAD_RECIRC_ID 0xFF010103
+void
+conntrack_nat_offload_flow_put(struct conntrack *ct, struct dp_packet *pkt,
+                               struct conn *conn, bool is_reply)
+OVS_REQUIRES(conn->lock)
+{
+    struct dp_netdev_flow *netdev_flow;
+    struct dp_netdev_pmd_thread *pmd;
+    struct netdev_flow_key mask, key;
+    struct match match;
+    ovs_u128 ufid;
+    struct dpif_flow_extra_para para = {
+        .flow_flags = DPCLS_RULE_FLAGS_NONE,
+        .counter_id = DEFAULT_COUNTER_ID,
+    };
+    if (!is_reply) {
+        para.priority = conn->flow.priority;
+    } else {
+        para.priority = conn->rev_flow.priority;
+    }
+    bool add_new_flow = false;
+    struct ofpbuf actions;
+
+    //init match
+    memset(&match, 0, sizeof(struct match));
+
+    match.flow.dl_type=htons(0x0800);
+    match.flow.in_port.odp_port = pkt->md.in_port.odp_port;
+
+    if (!is_reply) {
+        match.flow.recirc_id = conn->flow.recirc_id;
+        match.flow.nw_src = conn->key.src.addr.ipv4;
+        match.flow.nw_dst = conn->key.dst.addr.ipv4;
+        match.flow.nw_proto = conn->key.nw_proto;
+        if (conn->key.nw_proto == IPPROTO_TCP
+                || conn->key.nw_proto == IPPROTO_UDP) {
+            match.flow.tp_src = conn->key.src.port;
+            match.flow.tp_dst = conn->key.dst.port;
+        }
+
+        match.flow.tunnel.tun_id = pkt->md.tunnel.tun_id;
+        match.flow.tunnel.ip_dst = pkt->md.tunnel.ip_dst;
+        match.wc.masks.tunnel.tun_id = OVS_BE64_MAX;
+        match.wc.masks.tunnel.ip_dst = OVS_BE32_MAX;
+    } else {
+        match.flow.recirc_id = conn->rev_flow.recirc_id;
+        match.flow.nw_src = conn->rev_key.src.addr.ipv4;
+        match.flow.nw_dst = conn->rev_key.dst.addr.ipv4;
+        match.flow.nw_proto = conn->key.nw_proto;
+        if (conn->key.nw_proto == IPPROTO_TCP
+                || conn->key.nw_proto == IPPROTO_UDP) {
+            match.flow.tp_src = conn->rev_key.src.port;
+            match.flow.tp_dst = conn->rev_key.dst.port;
+        }
+    }
+
+    match.wc.masks.in_port.odp_port = UINT32_MAX;
+    match.wc.masks.recirc_id = UINT32_MAX;
+    match.wc.masks.dl_type = OVS_BE16_MAX;
+    match.wc.masks.nw_src = OVS_BE32_MAX;
+    match.wc.masks.nw_dst = OVS_BE32_MAX;
+    match.wc.masks.nw_proto = 0xFF;
+    if (conn->key.nw_proto == IPPROTO_TCP
+            || conn->key.nw_proto == IPPROTO_UDP) {
+        match.wc.masks.tp_src = OVS_BE16_MAX;
+        match.wc.masks.tp_dst = OVS_BE16_MAX;
+    }
+
+    dpif_flow_hash_dpctl_commands(NULL, &match.flow, sizeof match.flow, &ufid);
+    netdev_flow_mask_init(&mask, &match);
+    netdev_flow_key_init_masked(&key, &match.flow, &mask);
+
+    //init action
+    ofpbuf_init(&actions, 0);
+    struct ovs_key_ipv4 ipv4_key, ipv4_mask;
+    struct ovs_key_tcp tcp_key, tcp_mask;
+    struct ovs_key_udp udp_key, udp_mask;
+    struct ovs_key_ethernet eth_key, eth_mask;
+    memset(&ipv4_key, 0, sizeof ipv4_key);
+    memset(&ipv4_mask, 0, sizeof ipv4_key);
+    memset(&tcp_key, 0, sizeof tcp_key);
+    memset(&tcp_mask, 0, sizeof tcp_mask);
+    memset(&udp_key, 0, sizeof udp_key);
+    memset(&udp_mask, 0, sizeof udp_mask);
+    memset(&eth_key, 0, sizeof eth_key);
+    memset(&eth_mask, 0, sizeof eth_mask);
+
+    if (!is_reply) {
+        if (conn->nat_info->nat_action & NAT_ACTION_SRC) {
+            ipv4_key.ipv4_src = conn->rev_key.dst.addr.ipv4;
+            ipv4_mask.ipv4_src = OVS_BE32_MAX;
+            if (conn->key.nw_proto == IPPROTO_TCP) {
+                tcp_key.tcp_src = conn->rev_key.dst.port;
+                tcp_mask.tcp_src = OVS_BE16_MAX;
+            } else if (conn->key.nw_proto == IPPROTO_UDP) {
+                udp_key.udp_src = conn->rev_key.dst.port;
+                udp_mask.udp_src = OVS_BE16_MAX;
+            }
+
+        }
+        if (conn->nat_info->nat_action & NAT_ACTION_DST) {
+            ipv4_key.ipv4_dst = conn->rev_key.src.addr.ipv4;
+            ipv4_mask.ipv4_dst = OVS_BE32_MAX;
+            if (conn->key.nw_proto == IPPROTO_TCP) {
+                tcp_key.tcp_dst = conn->rev_key.src.port;
+                tcp_mask.tcp_dst = OVS_BE16_MAX;
+            } else if (conn->key.nw_proto == IPPROTO_UDP) {
+                udp_key.udp_dst = conn->rev_key.src.port;
+                udp_mask.udp_dst = OVS_BE16_MAX;
+            }
+
+        }
+    } else {
+        if (conn->nat_info->nat_action & NAT_ACTION_SRC) {
+            ipv4_key.ipv4_dst = conn->key.src.addr.ipv4;
+            ipv4_mask.ipv4_dst = OVS_BE32_MAX;
+            if (conn->key.nw_proto == IPPROTO_TCP) {
+                tcp_key.tcp_dst = conn->key.src.port;
+                tcp_mask.tcp_dst = OVS_BE16_MAX;
+            } else if (conn->key.nw_proto == IPPROTO_UDP) {
+                udp_key.udp_dst = conn->key.src.port;
+                udp_mask.udp_dst = OVS_BE16_MAX;
+            }
+        }
+        if (conn->nat_info->nat_action & NAT_ACTION_DST) {
+            ipv4_key.ipv4_src = conn->key.dst.addr.ipv4;
+            ipv4_mask.ipv4_src = OVS_BE32_MAX;
+            if (conn->key.nw_proto == IPPROTO_TCP) {
+                tcp_key.tcp_src = conn->key.dst.port;
+                tcp_mask.tcp_src = OVS_BE16_MAX;
+            } else if (conn->key.nw_proto == IPPROTO_UDP) {
+                udp_key.udp_src = conn->key.dst.port;
+                udp_mask.udp_src = OVS_BE16_MAX;
+            }
+        }
+    }
+
+    set_zone_to_dst_eth(&eth_key, &eth_mask, conn->key.zone);
+
+    commit_masked_set_action(&actions, OVS_KEY_ATTR_IPV4, &ipv4_key,
+            &ipv4_mask, sizeof ipv4_key);
+    if (conn->key.nw_proto == IPPROTO_TCP) {
+        commit_masked_set_action(&actions, OVS_KEY_ATTR_TCP, &tcp_key,
+                &tcp_mask, sizeof tcp_key);
+    } else if (conn->key.nw_proto == IPPROTO_UDP) {
+        commit_masked_set_action(&actions, OVS_KEY_ATTR_UDP, &udp_key,
+                &udp_mask, sizeof udp_key);
+    }
+    commit_masked_set_action(&actions, OVS_KEY_ATTR_ETHERNET,
+            &eth_key, &eth_mask,sizeof eth_key);
+
+    nl_msg_put_u32(&actions, OVS_ACTION_ATTR_RECIRC, CT_OFFLOAD_RECIRC_ID);
+
+
+    CMAP_FOR_EACH (pmd, node, &ct->dp->poll_threads) {
+        if (pmd->core_id == NON_PMD_CORE_ID) {
+            ovs_mutex_lock(&pmd->flow_mutex);
+            netdev_flow = dp_netdev_pmd_find_flow(pmd, &ufid,
+                    NULL, 0, para.priority);
+            if (!netdev_flow) {
+                netdev_flow = dp_netdev_flow_add(pmd, &match, &ufid,
+                        actions.data, actions.size, para);
+                add_new_flow = true;
+            }
+            ovs_mutex_unlock(&pmd->flow_mutex);
+        }
+    }
+
+    uint32_t hash = conntrack_nat_offload_flow_hash(&ufid);
+    if (add_new_flow) {
+        if (!is_reply) {
+            conn->flow.ufid = ufid;
+            netdev_flow->is_ct_flow = true;
+            ovs_mutex_lock(&ct->offload_lock);
+            cmap_insert(&ct->offload_flows, &conn->offload_flow_cm_node, hash);
+            ovs_mutex_unlock(&ct->offload_lock);
+        } else {
+            conn->rev_flow.ufid = ufid;
+            netdev_flow->is_rev_ct_flow = true;
+            ovs_mutex_lock(&ct->offload_lock);
+            cmap_insert(&ct->offload_flows, &conn->offload_rev_flow_cm_node, hash);
+            ovs_mutex_unlock(&ct->offload_lock);
+        }
+        VLOG_INFO("create ct offload flow, ufid: "UUID_FMT"\n", UUID_ARGS((struct uuid *)&ufid));
+    } else {
+        VLOG_WARN("ct offload flow already exist, ufid: "UUID_FMT"\n", UUID_ARGS((struct uuid *)&ufid));
+    }
+
+    ofpbuf_uninit(&actions);
+}
+
+void
+conntrack_nat_offload_flow_del(struct conntrack *ct, ovs_u128 *ufid, uint32_t priority)
+{
+    struct dp_netdev_pmd_thread *pmd;
+    struct dp_netdev_flow *del_flow;
+    pmd = dp_netdev_get_pmd(ct->dp, NON_PMD_CORE_ID);
+    if (!pmd) {
+        VLOG_WARN("no pmd found to del ct offload flow");
+        return;
+    }
+    ovs_mutex_lock(&pmd->flow_mutex);
+    del_flow = dp_netdev_pmd_find_flow(pmd, ufid, NULL, 0, priority);
+    if (del_flow) {
+        dp_netdev_pmd_remove_flow(pmd, del_flow);
+        VLOG_INFO("delete ct offload flow, ufid: "UUID_FMT"\n", UUID_ARGS((struct uuid *)ufid));
+    } else {
+        VLOG_WARN("no netdev flow found, ufid: "UUID_FMT"\n", UUID_ARGS((struct uuid *)ufid));
+    }
+    ovs_mutex_unlock(&pmd->flow_mutex);
+}

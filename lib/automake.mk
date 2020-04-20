@@ -336,7 +336,8 @@ lib_libopenvswitch_la_SOURCES = \
 	lib/lldp/lldpd-structs.c \
 	lib/lldp/lldpd-structs.h \
 	lib/counter.c \
-	lib/counter.h
+	lib/counter.h \
+	lib/conntrack-offload.h
 
 if WIN32
 lib_libopenvswitch_la_SOURCES += \
