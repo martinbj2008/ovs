@@ -3528,6 +3528,7 @@ try_queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
     struct dp_netdev_port *port;
     struct dpif_flow_stats stats;
     bool offload;
+    int ret;
 
     ovs_mutex_lock(&dp->port_mutex);
     port = dp_netdev_lookup_port(dp, odp_port);
@@ -3536,6 +3537,14 @@ try_queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
     if (port == NULL)
         return;
 
+    if (!strcmp(port->netdev->name, "vxlan_sys_4789")) {
+        ovs_mutex_lock(&dp->port_mutex);
+        ret = get_port_by_name(dp, "vxlan-offload", &port);
+        ovs_mutex_unlock(&dp->port_mutex);
+
+        if(ret)
+            return;
+    }
     dump.netdev = port->netdev;
     offload = netdev_flow_dump_next(&dump, NULL, NULL, &stats, NULL,
                                     CONST_CAST(ovs_u128 *, &netdev_flow->mega_ufid),

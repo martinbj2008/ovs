@@ -125,7 +125,9 @@ struct output_port_map port_map[] = {
         .pdev=NULL,
     },
     [VXLAN_OFFLOAD]={
-        .name="vxlan-offload",
+        .name="vxlan-offload", /* NOTE: If you would like to change that name, pls
+                                * change the try_queue_netdev_flow_del function.
+                                */
         .port_id = 0,
         .pdev=NULL,
     },
