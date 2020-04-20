@@ -1720,6 +1720,13 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_OF_POP_VLAN, NULL);
             break;
         case OVS_ACTION_ATTR_DROP:
+            /*
+             * Drop action hw only can associated with counter action,
+             * all other actions should discard.
+             */
+            free(actions.actions);
+            actions.actions = NULL;
+            actions.cnt = 0;
             add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_DROP, NULL);
             break;
         case OVS_ACTION_ATTR_COUNTER:
