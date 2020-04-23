@@ -2414,7 +2414,8 @@ mark_to_flow_disassociate(struct dp_netdev_pmd_thread *pmd,
         ovs_mutex_unlock(&pmd->dp->port_mutex);
 
         flow_mark_free(mark);
-        VLOG_INFO("Freed flow mark %u, ufid:"UUID_FMT"\n", mark, UUID_ARGS((struct uuid *)&flow->mega_ufid));
+        VLOG_INFO("Freed flow mark %u, ufid:"UUID_FMT"\n", mark,
+                UUID_ARGS((struct uuid *)&flow->mega_ufid));
 
         megaflow_to_mark_disassociate(&flow->mega_ufid);
     }
@@ -2535,7 +2536,8 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
          */
         mark = megaflow_to_mark_find(&flow->mega_ufid);
         if (mark != INVALID_FLOW_MARK) {
-            VLOG_INFO("Flow ufid:"UUID_FMT" has already been offloaded with mark %u\n", UUID_ARGS((struct uuid *)&flow->mega_ufid), mark);
+            VLOG_INFO("Flow ufid:"UUID_FMT" has already been offloaded with mark %u\n",
+                      UUID_ARGS((struct uuid *)&flow->mega_ufid), mark);
             if (flow->mark != INVALID_FLOW_MARK) {
                 ovs_assert(flow->mark == mark);
             } else {
@@ -3401,9 +3403,9 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
 {
     struct dp_netdev_flow *flow;
     struct netdev_flow_key mask;
-    struct dpcls *cls;
     uint32_t cnt_id = 0;
     int counter_cnt = 0;
+    struct dpcls *cls;
 
     /* Make sure in_port is exact matched before we read it. */
     ovs_assert(match->wc.masks.in_port.odp_port == ODPP_NONE);

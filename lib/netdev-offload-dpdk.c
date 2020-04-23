@@ -81,6 +81,14 @@ enum {
     OFFLOAD_PORT_MAX
 };
 
+#define RESOURCE_FREE(x)            \
+    do {                            \
+            if ((void*)x) {         \
+                free(x);            \
+            }                       \
+       } while(0)
+
+
 #define MAX_VXLAN_NUM 2
 struct vxlan_host_ip_map {
     ovs_be32  host_ip;
@@ -1726,8 +1734,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
              * Drop action hw only can associated with counter action,
              * all other actions should discard.
              */
-            free(actions.actions);
-            actions.actions = NULL;
+            RESOURCE_FREE(actions.actions);
             actions.cnt = 0;
             add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_DROP, NULL);
             break;
@@ -1770,16 +1777,14 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     mark.id = info->flow_mark;
     if (info->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION) {
         //discard all offload actions before because of upcall action
-        free(actions.actions);
-        actions.actions = NULL;
+        RESOURCE_FREE(actions.actions);
         actions.cnt = 0;
         netdev_offload_dpdk_upcall(&flow_attr, netdev, &mark, &actions, &tbl, UPCALL_TYPE_JUMP_TABLE);
     }
 
     if (info->flow_flags == DPCLS_RULE_FLAGS_MARK) {
         //discard all offload actions before because of upcall action
-        free(actions.actions);
-        actions.actions = NULL;
+        RESOURCE_FREE(actions.actions);
         actions.cnt = 0;
         flow_attr.transfer = 0;
         flow_attr.group = 0;
@@ -1809,8 +1814,8 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
              netdev_get_name(netdev), flow, UUID_ARGS((struct uuid *)ufid));
 
 out:
-    free(patterns.items);
-    free(actions.actions);
+    RESOURCE_FREE(patterns.items);
+    RESOURCE_FREE(actions.actions);
     return ret;
 }
 
