@@ -1329,6 +1329,36 @@ netdev_offload_dpdk_upcall(
     return NULL;
 }
 
+static void
+del_flow_action(struct flow_actions *actions, enum rte_flow_action_type type)
+{
+    int cnt = actions->cnt;
+    int i = 0;
+
+    if (cnt == 0) {
+        return;
+    }
+
+    for (i = 0; i < cnt; i++) {
+       if (actions->actions[i].type == type) {
+            if (i + 1 == cnt){
+                actions->actions[i].type = 0;
+                actions->actions[i].conf = NULL;
+            } else {
+                while (i + 1 < cnt) {
+                    actions->actions[i].type = actions->actions[i+1].type;
+                    actions->actions[i].conf = actions->actions[i+1].conf;
+                    i++;
+                }
+            }
+            actions->cnt -= 1;
+            break;
+       }
+    }
+
+    return;
+}
+
 static int
 netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const struct match *match,
@@ -1671,6 +1701,12 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                 netdev_offload_output_action(netdev, info->dpif_class, &actions,
                         &port_id, &out_put_action_cnt, 0, true);
             } else if (IS_JUMP_TABLE_RECIRC_ID(*recirc_id)) {
+                /*
+                 * Common jump table actions will delete default vxlan pop actions
+                 */
+                if (vxlan_match_flag) {
+                    del_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP);
+                }
                 netdev_offload_jump_group_action(&flow_attr, &actions,
                         OFFLOAD_JUMP_TABLE_COMMON, recirc_id, &tbl);
             } else {
