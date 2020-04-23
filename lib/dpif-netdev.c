@@ -100,6 +100,16 @@ DEFINE_STATIC_PER_THREAD_DATA(uint32_t, recirc_depth, 0)
 #define RECIRC_ID_SPEC_PATTERN 0xFF00
 #define IS_SPEC_RECIRC_ID(id) ((id >> 16) == RECIRC_ID_SPEC_PATTERN)
 #define GET_INPORT_ID_BY_SPEC_RECIRC_ID(id) (id & 0xFF)
+/*
+ * Now dpdk dplane flows in vxlan port offload needs port Map
+ * Vxlan encap action flows will offload in port vxlan_offload
+ * Vxlan tunnel match will offload in port downlink port
+ */
+enum {
+    VXLAN_OFFLOAD_NONE_FLAGS = 0,
+    VXLAN_OFFLOAD_TUNNEL_MATCH_FLAGS,
+    VXLAN_OFFLOAD_TUNNEL_PUSH_FLAGS
+};
 
 /* Configuration parameters. */
 enum { MAX_METERS = 65536 };    /* Maximum number of meters. */
@@ -257,6 +267,7 @@ static void dpcls_sort_subtable_vector(struct dpcls *);
 static void dpcls_insert(struct dpcls *, struct dpcls_rule *,
                          const struct netdev_flow_key *mask, bool is_appctl, uint32_t priority);
 static void dpcls_remove(struct dpcls *, struct dpcls_rule *);
+static char* dp_netdev_get_vxlan_offload_port_name(struct dp_netdev_flow *flow);
 /* Set of supported meter flags */
 #define DP_SUPPORTED_METER_FLAGS_MASK \
     (OFPMF13_STATS | OFPMF13_PKTPS | OFPMF13_KBPS | OFPMF13_BURST)
@@ -515,6 +526,7 @@ struct dp_netdev_flow {
     uint32_t priority;          /*add for dpcls subtable priority, this is same with subtable*/
     uint32_t flow_flags;
     uint32_t counter_id;
+    uint8_t offload_flags;
     /* Number of references.
      * The classifier owns one reference.
      * Any thread trying to keep a rule from being freed should hold its own
@@ -2111,21 +2123,6 @@ get_port_by_name(struct dp_netdev *dp,
     return ENODEV;
 }
 
-static struct dp_netdev_port *
-get_dpdk_port_by_type(struct dp_netdev *dp)
-    OVS_REQUIRES(dp->port_mutex)
-{
-    struct dp_netdev_port *port;
-
-    HMAP_FOR_EACH (port, node, &dp->ports) {
-        if (!strncmp(port->type, "dpdk", 4)) {
-            return port;
-        }
-    }
-
-    return NULL;
-}
-
 /* Returns 'true' if there is a port with pmd netdev. */
 static bool
 has_pmd_port(struct dp_netdev *dp)
@@ -2396,17 +2393,24 @@ mark_to_flow_disassociate(struct dp_netdev_pmd_thread *pmd,
      * remove the flow from hardware and free the mark.
      */
     if (flow_mark_has_no_ref(mark)) {
-        struct dp_netdev_port *port, *port_new;
         odp_port_t in_port = flow->flow.in_port.odp_port;
+        struct dp_netdev_port *port, *port_new;
+        char *port_name;
 
         ovs_mutex_lock(&pmd->dp->port_mutex);
         port = dp_netdev_lookup_port(pmd->dp, in_port);
         if (port) {
             if (!strcmp(port->type, "vxlan")) {
-                //get dpdk port to use dpdk offload api
-                port_new = get_dpdk_port_by_type(pmd->dp);
-                if (port_new) {
-                    port = port_new;
+                /*
+                 * Vxlan port flows offload will be port mapped.
+                 * Now need special process.
+                 */
+                port_name = dp_netdev_get_vxlan_offload_port_name(flow);
+                if (port_name) {
+                    get_port_by_name(pmd->dp, port_name, &port_new);
+                    if (port_new) {
+                        port = port_new;
+                    }
                 }
             }
             ret = netdev_flow_del(port->netdev, &flow->mega_ufid, NULL);
@@ -2512,15 +2516,16 @@ dp_netdev_flow_offload_del(struct dp_flow_offload_item *offload)
 static int
 dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
 {
-    struct dp_netdev_port *port;
-    struct dp_netdev_pmd_thread *pmd = offload->pmd;
+    bool modification = offload->op == DP_NETDEV_FLOW_OFFLOAD_OP_MOD;
     struct dp_netdev_flow *flow = offload->flow;
     odp_port_t in_port = flow->flow.in_port.odp_port;
-    bool modification = offload->op == DP_NETDEV_FLOW_OFFLOAD_OP_MOD;
+    struct dp_netdev_pmd_thread *pmd = offload->pmd;
+    struct dp_netdev_port *port_new;
+    struct dp_netdev_port *port;
     struct offload_info info;
+    char *port_name;
     uint32_t mark;
     int ret;
-    struct dp_netdev_port *port_new;
 
     if (flow->dead) {
         return -1;
@@ -2564,10 +2569,16 @@ dp_netdev_flow_offload_put(struct dp_flow_offload_item *offload)
     }
 
     if (!strcmp(port->type, "vxlan")) {
-        //get dpdk port to use dpdk offload api
-        port_new = get_dpdk_port_by_type(pmd->dp);
-        if (port_new) {
-            port = port_new;
+        /*
+         * Vxlan port flows offload will be port mapped.
+         * Now need special process.
+         */
+        port_name = dp_netdev_get_vxlan_offload_port_name(flow);
+        if (port_name) {
+            get_port_by_name(pmd->dp, port_name, &port_new);
+            if (port_new) {
+                port = port_new;
+            }
         }
     }
 
@@ -3394,6 +3405,57 @@ dp_netdev_counter_actions_cnt(const struct nlattr *actions, size_t actions_len, 
     return cnt;
 }
 
+static void
+dp_netdev_flow_offload_flag_set(const struct nlattr *actions,
+                                struct dp_netdev_flow *flow,
+                                struct match *match,
+                                size_t actions_len)
+{
+    const struct nlattr *a;
+    unsigned int left;
+    int type = 0;
+
+    flow->offload_flags = VXLAN_OFFLOAD_NONE_FLAGS;
+    if (match->wc.masks.tunnel.ip_src ||
+        match->wc.masks.tunnel.ip_dst ||
+        match->wc.masks.tunnel.tun_id ||
+        match->wc.masks.tunnel.tp_src ||
+        match->wc.masks.tunnel.tp_dst) {
+
+        flow->offload_flags = VXLAN_OFFLOAD_TUNNEL_MATCH_FLAGS;
+        return;
+    }
+
+    if (!actions_len) {
+        return;
+    }
+
+    NL_ATTR_FOR_EACH_UNSAFE (a, left, actions, actions_len) {
+        type = nl_attr_type(a);
+        if (type == OVS_ACTION_ATTR_TUNNEL_PUSH) {
+            flow->offload_flags = VXLAN_OFFLOAD_TUNNEL_PUSH_FLAGS;
+        }
+    }
+
+    return;
+}
+
+static char*
+dp_netdev_get_vxlan_offload_port_name(struct dp_netdev_flow *flow)
+{
+    /*
+     *  These port name associated with driver port map,
+     *  which defined in netdev-offload-dpdk.c port_map[].
+     */
+    if (flow->offload_flags == VXLAN_OFFLOAD_TUNNEL_MATCH_FLAGS) {
+        return "downlink";
+    } else if (flow->offload_flags == VXLAN_OFFLOAD_TUNNEL_PUSH_FLAGS) {
+        return "vxlan-offload";
+    } else {
+        return NULL;
+    }
+}
+
 static struct dp_netdev_flow *
 dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
                    struct match *match, const ovs_u128 *ufid,
@@ -3442,6 +3504,7 @@ dp_netdev_flow_add(struct dp_netdev_pmd_thread *pmd,
     flow->priority = para.priority;
     flow->flow_flags = para.flow_flags;
     flow->counter_id = para.counter_id;
+    dp_netdev_flow_offload_flag_set(actions, flow, match, actions_len);
     if (para.counter_id) {
         dp_counter_ref(para.counter_id);
     }else {
@@ -3529,6 +3592,7 @@ try_queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
     struct netdev_flow_dump dump;
     struct dp_netdev_port *port;
     struct dpif_flow_stats stats;
+    char *port_name;
     bool offload;
     int ret;
 
@@ -3540,8 +3604,9 @@ try_queue_netdev_flow_del(struct dp_netdev_pmd_thread *pmd,
         return;
 
     if (!strcmp(port->netdev->name, "vxlan_sys_4789")) {
+        port_name = dp_netdev_get_vxlan_offload_port_name(netdev_flow);
         ovs_mutex_lock(&dp->port_mutex);
-        ret = get_port_by_name(dp, "vxlan-offload", &port);
+        ret = get_port_by_name(dp, port_name, &port);
         ovs_mutex_unlock(&dp->port_mutex);
 
         if(ret)
@@ -3960,17 +4025,18 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
     ovs_mutex_unlock(&dump->mutex);
 
     for (i = 0; i < n_flows; i++) {
+        struct dpif_netdev *dpif = dpif_netdev_cast(thread->up.dpif);
         struct odputil_keybuf *maskbuf = &thread->maskbuf[i];
-        struct odputil_keybuf *keybuf = &thread->keybuf[i];
         struct dp_netdev_flow *netdev_flow = netdev_flows[i];
+        struct odputil_keybuf *keybuf = &thread->keybuf[i];
+        struct dp_netdev *dp = get_dp_netdev(&dpif->dpif);
         struct dpif_flow *f = &flows[i];
         struct netdev_flow_dump netdev_dump;
         struct dpif_flow_stats stats;
         struct ofpbuf key, mask;
         bool dump_offload = false;
         struct dp_netdev_port *port;
-        struct dpif_netdev *dpif = dpif_netdev_cast(thread->up.dpif);
-        struct dp_netdev *dp = get_dp_netdev(&dpif->dpif);
+        char *port_name;
 
         ofpbuf_use_stack(&key, keybuf, sizeof *keybuf);
         ofpbuf_use_stack(&mask, maskbuf, sizeof *maskbuf);
@@ -3984,9 +4050,16 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
             netdev_dump.netdev = port->netdev;
             dump_offload = false;
             if (!strcmp(port->type, "vxlan")) {
-                port = get_dpdk_port_by_type(dp);
-                if (port) {
-                    netdev_dump.netdev = port->netdev;
+                /*
+                 * Vxlan port flows offload will be port mapped.
+                 * Now need special process.
+                 */
+                port_name = dp_netdev_get_vxlan_offload_port_name(netdev_flow);
+                if (port_name) {
+                    get_port_by_name(dp, port_name, &port);
+                    if (port) {
+                        netdev_dump.netdev = port->netdev;
+                    }
                 }
             }
 
