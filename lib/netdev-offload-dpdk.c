@@ -800,7 +800,7 @@ dpdk_meter_create(struct dpif *dpif, struct netdev *netdev, uint32_t mid)
     params.action[RTE_COLOR_YELLOW] = MTR_POLICER_ACTION_DROP;
     params.action[RTE_COLOR_RED]    = MTR_POLICER_ACTION_DROP;
 
-    ret = rte_mtr_create(dmo->port_id, dmo->mc.mtr_id, &params, 0, &mtr_error);
+    ret = rte_mtr_create(dmo->port_id, dmo->mc.mtr_id, &params, 1, &mtr_error);
     if (ret && ret != -EEXIST) {
         VLOG_ERR("rte_mtr_create fail: err_type: %d err_msg: %s, portid: %d\n",
                    mtr_error.type, mtr_error.message, netdev_dpdk_get_portid(netdev));
