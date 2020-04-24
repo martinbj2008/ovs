@@ -1329,36 +1329,6 @@ netdev_offload_dpdk_upcall(
     return NULL;
 }
 
-static void
-del_flow_action(struct flow_actions *actions, enum rte_flow_action_type type)
-{
-    int cnt = actions->cnt;
-    int i = 0;
-
-    if (cnt == 0) {
-        return;
-    }
-
-    for (i = 0; i < cnt; i++) {
-       if (actions->actions[i].type == type) {
-            if (i + 1 == cnt){
-                actions->actions[i].type = 0;
-                actions->actions[i].conf = NULL;
-            } else {
-                while (i + 1 < cnt) {
-                    actions->actions[i].type = actions->actions[i+1].type;
-                    actions->actions[i].conf = actions->actions[i+1].conf;
-                    i++;
-                }
-            }
-            actions->cnt -= 1;
-            break;
-       }
-    }
-
-    return;
-}
-
 static int
 netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const struct match *match,
@@ -1409,6 +1379,12 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
     if (ret)
         return ret;
 
+    if (IS_SPEC_RECIRC_ID(match->flow.recirc_id)
+            && IS_JUMP_TABLE_RECIRC_ID(match->flow.recirc_id)) {
+        //if match key has 0xFF01000A pattern, then we will install flow in A table in HW
+        flow_attr.group = GET_RECIRC_JUMP_TABLE_ID(match->flow.recirc_id);
+    }
+
     /* vxlan pattern */
     if (match->wc.masks.tunnel.ip_src ||
         match->wc.masks.tunnel.ip_dst ||
@@ -1434,8 +1410,10 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         mask.outer_ipv4.hdr.src_addr        = match->wc.masks.tunnel.ip_src;
         mask.outer_ipv4.hdr.dst_addr        = match->wc.masks.tunnel.ip_dst;
 
-        add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_IPV4,
-                         &spec.outer_ipv4, &mask.outer_ipv4);
+        if (flow_attr.group == COMMON_OFFLOAD_PORT_TBALE_ID) {
+            add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_IPV4,
+                             &spec.outer_ipv4, &mask.outer_ipv4);
+        }
 
         /* Save proto for L4 protocol setup */
         proto_l4 = spec.outer_ipv4.hdr.next_proto_id &
@@ -1450,8 +1428,10 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             mask.outer_udp.hdr.src_port = match->wc.masks.tunnel.tp_src;
             mask.outer_udp.hdr.dst_port = match->wc.masks.tunnel.tp_dst;
 
-            add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_UDP,
-                             &spec.outer_udp, &mask.outer_udp);
+            if (flow_attr.group == COMMON_OFFLOAD_PORT_TBALE_ID) {
+                add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_UDP,
+                                 &spec.outer_udp, &mask.outer_udp);
+            }
 
             struct vni {
                 union  {
@@ -1481,10 +1461,12 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             mask.vxlan.vni[1] = vni_m.vni[2];
             mask.vxlan.vni[2] = vni_m.vni[3];
 
-            add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_VXLAN,
-                             &spec.vxlan, &mask.vxlan);
+            if (flow_attr.group == COMMON_OFFLOAD_PORT_TBALE_ID) {
+                add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_VXLAN,
+                                 &spec.vxlan, &mask.vxlan);
+                vxlan_match_flag = true;
+            }
 
-            vxlan_match_flag = true;
             cfg_port = netdev_offload_get_vxlan_pop_pf_id(match->flow.tunnel.ip_dst);
             if (!cfg_port) {
                 VLOG_WARN("Can not get vxlan pop cfg port id, dst ip: 0x%x", match->flow.tunnel.ip_dst);
@@ -1661,12 +1643,6 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         add_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP, NULL);
     }
 
-    if (IS_SPEC_RECIRC_ID(match->flow.recirc_id)
-            && IS_JUMP_TABLE_RECIRC_ID(match->flow.recirc_id)) {
-        //if match key has 0xFF01000A pattern, then we will install flow in A table in HW
-        flow_attr.group = GET_RECIRC_JUMP_TABLE_ID(match->flow.recirc_id);
-    }
-
     NL_ATTR_FOR_EACH_UNSAFE (a, left, nl_actions, actions_len) {
         int type = nl_attr_type(a);
         switch ((enum ovs_action_attr) type) {
@@ -1701,12 +1677,6 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                 netdev_offload_output_action(netdev, info->dpif_class, &actions,
                         &port_id, &out_put_action_cnt, 0, true);
             } else if (IS_JUMP_TABLE_RECIRC_ID(*recirc_id)) {
-                /*
-                 * Common jump table actions will delete default vxlan pop actions
-                 */
-                if (vxlan_match_flag) {
-                    del_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP);
-                }
                 netdev_offload_jump_group_action(&flow_attr, &actions,
                         OFFLOAD_JUMP_TABLE_COMMON, recirc_id, &tbl);
             } else {
