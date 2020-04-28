@@ -529,7 +529,7 @@ print_dpdk_version(void)
 #ifdef DPDK_GIT_TAG
     char dpdk_ver[512];
 
-    snprintf(dpdk_ver, sizeof(dpdk_ver), "%s:%s\n%s", rte_version(),
+    snprintf(dpdk_ver, sizeof(dpdk_ver), "%s@%s\n%s", rte_version(),
              DPDK_GIT_TAG, DPDK_GIT_COMMIT);
 
     puts(dpdk_ver);
