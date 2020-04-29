@@ -1036,6 +1036,8 @@ dpctl_get_flow_flags(uint32_t flags)
             return "skip_hw_act";
         case DPCLS_RULE_FLAGS_MARK:
             return "mark";
+        case DPCLS_RULE_FLAGS_SKIP_HW_ACTION_EXACT_CT:
+            return "exact_ct";
         default:
             return "unkown";
     }

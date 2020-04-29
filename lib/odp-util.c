@@ -8671,6 +8671,10 @@ odp_flags_from_string(const char *s_, uint32_t * pflags)
             *pflags = DPCLS_RULE_FLAGS_SKIP_HW_ACTION;
             s += 11;
         }
+        else if(!strncasecmp(s, "exact_ct", 8)) {
+            *pflags = DPCLS_RULE_FLAGS_SKIP_HW_ACTION_EXACT_CT;
+            s += 8;
+        }
         else if(!strncasecmp(s, "skip_hw", 7)) {
             *pflags = DPCLS_RULE_FLAGS_SKIP_HW;
             s += 7;

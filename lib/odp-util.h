@@ -400,6 +400,10 @@ enum {
     DPCLS_RULE_FLAGS_SKIP_HW,
     DPCLS_RULE_FLAGS_SKIP_HW_ACTION,
     DPCLS_RULE_FLAGS_MARK,
+    /* Same effect with skip_hw_act when offload
+     * This flag only used for ct module
+     */
+    DPCLS_RULE_FLAGS_SKIP_HW_ACTION_EXACT_CT,
     DPCLS_RULE_FLAGS_MAX
 };
 
