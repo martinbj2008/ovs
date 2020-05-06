@@ -537,6 +537,9 @@ struct dp_netdev_flow {
     bool dead;
     uint32_t mark;               /* Unique flow mark assigned to a flow */
 
+    bool is_ct_flow;
+    bool is_rev_ct_flow;
+
     /* Statistics. */
     struct dp_netdev_flow_stats stats;
     struct dp_netdev_flow_stats_brief old_stats;
@@ -789,6 +792,7 @@ static void dp_netdev_execute_actions(struct dp_netdev_pmd_thread *pmd,
                                       struct dp_packet_batch *,
                                       bool should_steal,
                                       const struct flow *flow,
+                                      const struct dpif_flow_extra_para *para,
                                       const struct nlattr *actions,
                                       size_t actions_len);
 static void dp_netdev_input(struct dp_netdev_pmd_thread *,
@@ -1630,7 +1634,7 @@ create_dp_netdev(const char *name, const struct dpif_class *class,
     dp->upcall_aux = NULL;
     dp->upcall_cb = NULL;
 
-    dp->conntrack = conntrack_init();
+    dp->conntrack = conntrack_init(dp);
 
     atomic_init(&dp->emc_insert_min, DEFAULT_EM_FLOW_INSERT_MIN);
     atomic_init(&dp->tx_flush_interval, DEFAULT_TX_FLUSH_INTERVAL);
@@ -3941,25 +3945,60 @@ dpif_netdev_flow_dump_thread_destroy(struct dpif_flow_dump_thread *thread_)
 }
 
 static void
-dpif_netdev_flow_counter_process(struct dp_netdev_flow *netdev_flow,
+dp_netdev_flow_stats_update(struct dp_netdev *dp, struct dp_netdev_flow *netdev_flow,
         bool offload, struct dpif_flow_stats *pstats)
 {
-    uint64_t npkts, nbytes, npkts_old, nbytes_old;
+    uint64_t npkts, nbytes, npkts_old, nbytes_old, used;
 
-    if (netdev_flow->counter_id == 0 || !offload || (offload && netdev_flow->pmd_id != NON_PMD_CORE_ID)) {
+    if (!offload || (offload && netdev_flow->pmd_id != NON_PMD_CORE_ID)) {
         return;  //only statistic offload flows
     }
 
     atomic_read_relaxed(&netdev_flow->old_stats.packet_count, &npkts_old);
     atomic_read_relaxed(&netdev_flow->old_stats.byte_count, &nbytes_old);
+    atomic_read_relaxed(&netdev_flow->stats.used, &used);
     npkts = pstats->n_packets;
     nbytes = pstats->n_bytes;
 
     if (npkts > npkts_old && nbytes > nbytes_old) {
-        dp_counter_push(netdev_flow->counter_id, netdev_flow->pmd_id,
-                npkts-npkts_old, nbytes-nbytes_old, DP_COUNTER_PMD_STATS_TYPE_ADD);
+        if (netdev_flow->counter_id != 0) {
+            dp_counter_push(netdev_flow->counter_id, netdev_flow->pmd_id,
+                    npkts-npkts_old, nbytes-nbytes_old, DP_COUNTER_PMD_STATS_TYPE_ADD);
+        }
+
         atomic_store_relaxed(&netdev_flow->old_stats.packet_count, npkts);
         atomic_store_relaxed(&netdev_flow->old_stats.byte_count, nbytes);
+        used = MAX(used, time_msec());
+        atomic_store_relaxed(&netdev_flow->stats.used, used);
+
+        if (netdev_flow->is_ct_flow) {
+            struct conn *conn;
+            uint32_t hash;
+            hash = conntrack_nat_offload_flow_hash(&netdev_flow->ufid);
+            CMAP_FOR_EACH_WITH_HASH (conn, offload_flow_cm_node,
+                    hash, &dp->conntrack->offload_flows) {
+                if (!memcmp(&conn->flow.ufid, &netdev_flow->ufid,
+                            sizeof(ovs_u128))) {
+                    atomic_store_relaxed(&conn->flow.packet_count, npkts);
+                    atomic_store_relaxed(&conn->flow.byte_count, nbytes);
+                    atomic_store_relaxed(&conn->flow.used, used);
+                }
+            }
+        } else if (netdev_flow->is_rev_ct_flow) {
+            struct conn *conn;
+            uint32_t hash;
+            hash = conntrack_nat_offload_flow_hash(&netdev_flow->ufid);
+            CMAP_FOR_EACH_WITH_HASH (conn, offload_rev_flow_cm_node,
+                    hash, &dp->conntrack->offload_flows) {
+                if (!memcmp(&conn->rev_flow.ufid, &netdev_flow->ufid,
+                            sizeof(ovs_u128))) {
+                    atomic_store_relaxed(&conn->rev_flow.packet_count, npkts);
+                    atomic_store_relaxed(&conn->rev_flow.byte_count, nbytes);
+                    atomic_store_relaxed(&conn->rev_flow.used, used);
+                }
+            }
+
+        }
     }
 }
 
@@ -4074,7 +4113,7 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
         dp_netdev_flow_to_dpif_flow(netdev_flow, &key, &mask, f,
                                     dump->up.terse);
 
-        dpif_netdev_flow_counter_process(netdev_flow, dump_offload, &stats);
+        dp_netdev_flow_stats_update(dp, netdev_flow, dump_offload, &stats);
         if (dump_offload) {
             f->attrs.offloaded = true;
             f->attrs.dp_layer = "dpdk";
@@ -4146,7 +4185,7 @@ dpif_netdev_execute(struct dpif *dpif, struct dpif_execute *execute)
 
     dp_packet_batch_init_packet(&pp, execute->packet);
     pp.do_not_steal = true;
-    dp_netdev_execute_actions(pmd, &pp, false, execute->flow,
+    dp_netdev_execute_actions(pmd, &pp, false, execute->flow, NULL,
                               execute->actions, execute->actions_len);
     dp_netdev_pmd_flush_output_packets(pmd, true);
 
@@ -6863,8 +6902,14 @@ packet_batch_per_flow_execute(struct packet_batch_per_flow *batch,
                         batch->tcp_flags, pmd->ctx.now / 1000);
 
     actions = dp_netdev_flow_get_actions(flow);
+    struct dpif_flow_extra_para para = {
+        .priority = flow->priority,
+        .flow_flags = flow->flow_flags,
+        .counter_id = flow->counter_id,
+        .recirc_id = flow->flow.recirc_id,
+    };
 
-    dp_netdev_execute_actions(pmd, &batch->array, true, &flow->flow,
+    dp_netdev_execute_actions(pmd, &batch->array, true, &flow->flow, &para,
                               actions->actions, actions->size);
 }
 
@@ -7157,7 +7202,7 @@ handle_packet_upcall(struct dp_netdev_pmd_thread *pmd,
      * the actions.  Otherwise, if there are any slow path actions,
      * we'll send the packet up twice. */
     dp_packet_batch_init_packet(&b, packet);
-    dp_netdev_execute_actions(pmd, &b, true, &match.flow,
+    dp_netdev_execute_actions(pmd, &b, true, &match.flow, NULL,
                               actions->data, actions->size);
 
     add_actions = put_actions->size ? put_actions : actions;
@@ -7395,6 +7440,7 @@ dp_netdev_recirculate(struct dp_netdev_pmd_thread *pmd,
 struct dp_netdev_execute_aux {
     struct dp_netdev_pmd_thread *pmd;
     const struct flow *flow;
+    const struct dpif_flow_extra_para *para;
 };
 
 static void
@@ -7538,7 +7584,7 @@ dp_execute_userspace_action(struct dp_netdev_pmd_thread *pmd,
                              NULL);
     if (!error || error == ENOSPC) {
         dp_packet_batch_init_packet(&b, packet);
-        dp_netdev_execute_actions(pmd, &b, should_steal, flow,
+        dp_netdev_execute_actions(pmd, &b, should_steal, flow, NULL,
                                   actions->data, actions->size);
     } else if (should_steal) {
         dp_packet_delete(packet);
@@ -7874,7 +7920,7 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
         conntrack_execute(dp->conntrack, packets_, aux->flow->dl_type, force,
                           commit, zone, setmark, setlabel, aux->flow->tp_src,
                           aux->flow->tp_dst, helper, nat_action_info_ref,
-                          pmd->ctx.now / 1000);
+                          pmd->ctx.now / 1000, aux->para);
         break;
     }
 
@@ -7917,9 +7963,10 @@ static void
 dp_netdev_execute_actions(struct dp_netdev_pmd_thread *pmd,
                           struct dp_packet_batch *packets,
                           bool should_steal, const struct flow *flow,
+                          const struct dpif_flow_extra_para *para,
                           const struct nlattr *actions, size_t actions_len)
 {
-    struct dp_netdev_execute_aux aux = { pmd, flow };
+    struct dp_netdev_execute_aux aux = { pmd, flow, para};
 
     odp_execute_actions(&aux, packets, should_steal, actions,
                         actions_len, dp_execute_cb);

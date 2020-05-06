@@ -70,6 +70,7 @@ struct in6_addr;
 struct smap;
 struct sset;
 struct ovs_action_push_tnl;
+struct dp_netdev;
 
 enum netdev_pt_mode {
     /* The netdev is packet type aware.  It can potentially carry any kind of

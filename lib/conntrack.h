@@ -30,6 +30,8 @@
 #include "ovs-thread.h"
 #include "packets.h"
 #include "hindex.h"
+#include "netdev.h"
+#include "dpif.h"
 
 /* Userspace connection tracker
  * ============================
@@ -101,7 +103,7 @@ struct nat_action_info_t {
     struct nat_rs_pack_t nat_rs_pack;
 };
 
-struct conntrack *conntrack_init(void);
+struct conntrack *conntrack_init(struct dp_netdev *dp);
 void conntrack_destroy(struct conntrack *);
 
 int conntrack_execute(struct conntrack *ct, struct dp_packet_batch *pkt_batch,
@@ -110,7 +112,7 @@ int conntrack_execute(struct conntrack *ct, struct dp_packet_batch *pkt_batch,
                       const struct ovs_key_ct_labels *setlabel,
                       ovs_be16 tp_src, ovs_be16 tp_dst, const char *helper,
                       const struct nat_action_info_t *nat_action_info,
-                      long long now);
+                      long long now, const struct dpif_flow_extra_para *para);
 void conntrack_clear(struct dp_packet *packet);
 
 struct conntrack_dump {

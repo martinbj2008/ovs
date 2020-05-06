@@ -89,6 +89,16 @@ enum OVS_PACKED_ENUM ct_conn_type {
     CT_CONN_TYPE_UN_NAT,
 };
 
+struct offload_flow {
+    bool is_offloaded;
+    uint32_t priority;
+    uint32_t recirc_id;
+    ovs_u128 ufid;
+    atomic_llong used;             /* Last used time, in monotonic msecs. */
+    atomic_ullong packet_count;    /* Number of packets matched. */
+    atomic_ullong byte_count;      /* Number of bytes matched. */
+};
+
 struct conn {
     /* Immutable data. */
     struct conn_key key;
@@ -115,6 +125,11 @@ struct conn {
     /* Immutable data. */
     bool alg_related; /* True if alg data connection. */
     enum ct_conn_type conn_type;
+
+    struct offload_flow flow;
+    struct offload_flow rev_flow;
+    struct cmap_node offload_flow_cm_node;
+    struct cmap_node offload_rev_flow_cm_node;
 };
 
 enum ct_update_res {
@@ -155,6 +170,7 @@ enum ct_timeout {
 };
 
 struct conntrack {
+    struct dp_netdev *dp;
     struct ovs_mutex ct_lock; /* Protects 2 following fields. */
     struct cmap conns OVS_GUARDED;
     struct ovs_list exp_lists[N_CT_TM] OVS_GUARDED;
@@ -179,6 +195,9 @@ struct conntrack {
 
     /*rs pool for full nat*/
     struct rculist rs_pools;
+
+    struct ovs_mutex offload_lock; /*protect the flowing offload_flows*/
+    struct cmap offload_flows OVS_GUARDED;
 };
 
 /* Lock acquisition order:

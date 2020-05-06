@@ -2031,7 +2031,6 @@ netdev_offload_dpdk_flow_dump_next(struct netdev_flow_dump *dump,
 
     stats->n_packets = ethdev_count.hits;
     stats->n_bytes = ethdev_count.bytes;
-    stats->used = time_msec();
     return true;
 }
 

@@ -512,6 +512,7 @@ struct dpif_flow_extra_para {
     uint32_t priority;
     uint32_t flow_flags;
     uint32_t counter_id;
+    uint32_t recirc_id;
 };
 
 void dpif_flow_stats_extract(const struct flow *, const struct dp_packet *packet,

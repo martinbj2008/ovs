@@ -25,6 +25,7 @@
 #include "bitmap.h"
 #include "conntrack.h"
 #include "conntrack-private.h"
+#include "conntrack-offload.h"
 #include "coverage.h"
 #include "csum.h"
 #include "ct-dpif.h"
@@ -32,8 +33,10 @@
 #include "flow.h"
 #include "netdev.h"
 #include "odp-netlink.h"
+#include "odp-util.h"
 #include "openvswitch/hmap.h"
 #include "openvswitch/vlog.h"
+#include "openvswitch/ofp-print.h"
 #include "ovs-rcu.h"
 #include "ovs-thread.h"
 #include "openvswitch/poll-loop.h"
@@ -293,9 +296,10 @@ ct_print_conn_info(const struct conn *c, const char *log_msg,
 /* Initializes the connection tracker 'ct'.  The caller is responsible for
  * calling 'conntrack_destroy()', when the instance is not needed anymore */
 struct conntrack *
-conntrack_init(void)
+conntrack_init(struct dp_netdev *dp)
 {
     struct conntrack *ct = xzalloc(sizeof *ct);
+    ct->dp = dp;
 
     ovs_rwlock_init(&ct->resources_lock);
     ovs_rwlock_wrlock(&ct->resources_lock);
@@ -318,6 +322,11 @@ conntrack_init(void)
     ct->clean_thread = ovs_thread_create("ct_clean", clean_thread_main, ct);
     ct->ipf = ipf_init();
     rculist_init(&ct->rs_pools);
+
+    ovs_mutex_init_adaptive(&ct->offload_lock);
+    ovs_mutex_lock(&ct->offload_lock);
+    cmap_init(&ct->offload_flows);
+    ovs_mutex_unlock(&ct->offload_lock);
 
     return ct;
 }
@@ -376,6 +385,11 @@ conntrack_destroy(struct conntrack *ct)
     latch_set(&ct->clean_thread_exit);
     pthread_join(ct->clean_thread, NULL);
     latch_destroy(&ct->clean_thread_exit);
+
+    ovs_mutex_lock(&ct->offload_lock);
+    cmap_destroy(&ct->offload_flows);
+    ovs_mutex_unlock(&ct->offload_lock);
+    ovs_mutex_destroy(&ct->offload_lock);
 
     ovs_mutex_lock(&ct->ct_lock);
     CMAP_FOR_EACH (conn, cm_node, &ct->conns) {
@@ -1175,7 +1189,8 @@ process_one(struct conntrack *ct, struct dp_packet *pkt,
             bool force, bool commit, long long now, const uint32_t *setmark,
             const struct ovs_key_ct_labels *setlabel,
             const struct nat_action_info_t *nat_action_info,
-            ovs_be16 tp_src, ovs_be16 tp_dst, const char *helper)
+            ovs_be16 tp_src, ovs_be16 tp_dst, const char *helper,
+            const struct dpif_flow_extra_para *para)
 {
     bool create_new_conn = false;
     conn_key_lookup(ct, &ctx->key, ctx->hash, now, &ctx->conn, &ctx->reply);
@@ -1221,6 +1236,17 @@ process_one(struct conntrack *ct, struct dp_packet *pkt,
         }
         if (nat_action_info && !create_new_conn) {
             handle_nat(pkt, conn, zone, ctx->reply, ctx->icmp_related);
+            ovs_mutex_lock(&conn->lock);
+            if (ctx->reply && conn->flow.is_offloaded &&
+                !conn->rev_flow.is_offloaded &&
+                conntrack_nat_offload_is_enable() && para &&
+                para->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION_EXACT_CT) {
+                conn->rev_flow.priority = 10;
+                conn->rev_flow.recirc_id = para->recirc_id;
+                conntrack_nat_offload_flow_put(ct, pkt, conn, true);
+                conn->rev_flow.is_offloaded = true;
+            }
+            ovs_mutex_unlock(&conn->lock);
         }
 
     } else if (check_orig_tuple(ct, pkt, ctx, now, &conn, nat_action_info)) {
@@ -1237,6 +1263,7 @@ process_one(struct conntrack *ct, struct dp_packet *pkt,
 
     const struct alg_exp_node *alg_exp = NULL;
     struct alg_exp_node alg_exp_entry;
+    bool is_conn_not_found = false;
 
     if (OVS_UNLIKELY(create_new_conn)) {
 
@@ -1254,8 +1281,23 @@ process_one(struct conntrack *ct, struct dp_packet *pkt,
         if (!conn_lookup(ct, &ctx->key, now, NULL, NULL)) {
             conn = conn_not_found(ct, pkt, ctx, commit, now, nat_action_info,
                                   helper, alg_exp, ct_alg_ctl);
+            is_conn_not_found = true;
         }
         ovs_mutex_unlock(&ct->ct_lock);
+
+        if (is_conn_not_found && conn) {
+            ovs_mutex_lock(&conn->lock);
+            if (!conn->flow.is_offloaded &&
+                conntrack_nat_offload_is_enable() && para &&
+                para->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION_EXACT_CT) {
+                conn->flow.priority = 6;
+                conn->flow.recirc_id = para->recirc_id;
+                conn->expiration = LLONG_MAX;
+                conntrack_nat_offload_flow_put(ct, pkt, conn, false);
+                conn->flow.is_offloaded = true;
+            }
+            ovs_mutex_unlock(&conn->lock);
+        }
     }
 
     write_ct_md(pkt, zone, conn, &ctx->key, alg_exp);
@@ -1268,7 +1310,9 @@ process_one(struct conntrack *ct, struct dp_packet *pkt,
         set_label(pkt, conn, &setlabel[0], &setlabel[1]);
     }
 
-    if (conn && zone == SET_DST_MAC_ZONE) {
+    if ((conn && zone == SET_DST_MAC_ZONE) ||
+            (para && para->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION_EXACT_CT &&
+             conn && conn->nat_info && conn->nat_info->zone == SET_DST_MAC_ZONE)) {
         set_zone_to_dst_mac(pkt, conn);
     }
 
@@ -1291,7 +1335,7 @@ conntrack_execute(struct conntrack *ct, struct dp_packet_batch *pkt_batch,
                   const struct ovs_key_ct_labels *setlabel,
                   ovs_be16 tp_src, ovs_be16 tp_dst, const char *helper,
                   const struct nat_action_info_t *nat_action_info,
-                  long long now)
+                  long long now, const struct dpif_flow_extra_para *para)
 {
     ipf_preprocess_conntrack(ct->ipf, pkt_batch, now, dl_type, zone,
                              ct->hash_basis);
@@ -1307,7 +1351,7 @@ conntrack_execute(struct conntrack *ct, struct dp_packet_batch *pkt_batch,
             continue;
         }
         process_one(ct, packet, &ctx, zone, force, commit, now, setmark,
-                    setlabel, nat_action_info, tp_src, tp_dst, helper);
+                    setlabel, nat_action_info, tp_src, tp_dst, helper, para);
     }
 
     ipf_postprocess_conntrack(ct->ipf, pkt_batch, now, dl_type);
@@ -1373,6 +1417,82 @@ set_zone_to_dst_mac(struct dp_packet *pkt, struct conn *conn)
     }
 }
 
+#define CT_OFFLOAD_TIMEOUT (30 * 1000)
+
+static long long
+ct_offload_sweep(struct conntrack *ct, long long now, size_t limit)
+{
+    struct conn *conn, *next;
+    long long min_expiration = LLONG_MAX;
+    size_t count = 0;
+    uint64_t used, rev_used;
+    uint32_t flow_hash, rev_flow_hash;
+    struct conn *cm_node;
+
+    ovs_mutex_lock(&ct->ct_lock);
+    for (unsigned i = 0; i < N_CT_TM; i++) {
+        LIST_FOR_EACH_SAFE (conn, next, exp_node, &ct->exp_lists[i]) {
+            ovs_mutex_lock(&conn->lock);
+            if (!conn->flow.is_offloaded) {
+                if (now < conn->expiration || count >= limit) {
+                    min_expiration = MIN(min_expiration, conn->expiration);
+                    ovs_mutex_unlock(&conn->lock);
+                    if (count >= limit) {
+                        /* Do not check other lists. */
+                        COVERAGE_INC(conntrack_long_cleanup);
+                        goto out;
+                    }
+                    break;
+                } else {
+                    ovs_mutex_unlock(&conn->lock);
+                    conn_clean(ct, conn);
+                }
+                count++;
+
+            } else {
+                ovs_mutex_unlock(&conn->lock);
+                atomic_read_relaxed(&conn->flow.used, &used);
+                atomic_read_relaxed(&conn->rev_flow.used, &rev_used);
+                if (used <= now - CT_OFFLOAD_TIMEOUT &&
+                        rev_used <= now - CT_OFFLOAD_TIMEOUT
+                        && count < limit) {
+                    flow_hash = conntrack_nat_offload_flow_hash(&conn->flow.ufid);
+                    rev_flow_hash = conntrack_nat_offload_flow_hash(&conn->rev_flow.ufid);
+
+                    ovs_mutex_lock(&ct->offload_lock);
+                    CMAP_FOR_EACH_WITH_HASH(cm_node, offload_flow_cm_node, flow_hash, &ct->offload_flows) {
+                        if (cm_node == conn) {
+                            cmap_remove(&ct->offload_flows, &conn->offload_flow_cm_node, flow_hash);
+                        }
+                    }
+                    CMAP_FOR_EACH_WITH_HASH(cm_node, offload_rev_flow_cm_node, rev_flow_hash, &ct->offload_flows) {
+                        if (cm_node == conn) {
+                            cmap_remove(&ct->offload_flows, &conn->offload_rev_flow_cm_node, rev_flow_hash);
+                        }
+                    }
+
+                    ovs_mutex_unlock(&ct->offload_lock);
+
+                    conntrack_nat_offload_flow_del(ct, &conn->flow.ufid, conn->flow.priority);
+                    conntrack_nat_offload_flow_del(ct, &conn->rev_flow.ufid, conn->rev_flow.priority);
+
+                    conn_clean(ct, conn);
+                    count++;
+                } else if (count >= limit) {
+                    /* Do not check other lists. */
+                    COVERAGE_INC(conntrack_long_cleanup);
+                    goto out;
+                }
+            }
+        }
+    }
+
+out:
+    VLOG_DBG("conntrack cleanup %"PRIuSIZE" entries in %lld msec", count,
+             time_msec() - now);
+    ovs_mutex_unlock(&ct->ct_lock);
+    return min_expiration;
+}
 
 /* Delete the expired connections from 'ctb', up to 'limit'. Returns the
  * earliest expiration time among the remaining connections in 'ctb'.  Returns
@@ -1424,7 +1544,12 @@ conntrack_clean(struct conntrack *ct, long long now)
     unsigned int n_conn_limit;
     atomic_read_relaxed(&ct->n_conn_limit, &n_conn_limit);
     size_t clean_max = n_conn_limit > 10 ? n_conn_limit / 10 : 1;
-    long long min_exp = ct_sweep(ct, now, clean_max);
+    long long min_exp;
+    if (conntrack_nat_offload_is_enable()) {
+        min_exp = ct_offload_sweep(ct, now, clean_max);
+    } else {
+        min_exp = ct_sweep(ct, now, clean_max);
+    }
     long long next_wakeup = MIN(min_exp, now + CT_TM_MIN);
 
     return next_wakeup;
