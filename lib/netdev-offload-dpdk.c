@@ -67,7 +67,8 @@ typedef enum {
 #define IS_VXLAN_RECIRC_ID(id) ((id >> 16) == RECIRC_ID_VXLAN_PATTERN)
 #define IS_JUMP_TABLE_RECIRC_ID(id) ((id >> 16) == RECIRC_ID_JUMP_TABLE_PATTERN)
 
-#define GET_RECIRC_JUMP_TABLE_ID(id) (id & 0xf)
+#define GET_RECIRC_JUMP_TABLE_ID(id) (id & 0xff)
+#define GET_RECIRC_JUMP_TABLE_VXLAN_DECAP_FLAG(id) ((id >> 8) & 0xf)
 
 bool soft_hard_compatible_flag = false;
 enum {
@@ -1329,6 +1330,37 @@ netdev_offload_dpdk_upcall(
     return NULL;
 }
 
+static void
+del_flow_action(struct flow_actions *actions, enum rte_flow_action_type type)
+{
+    int cnt = actions->cnt;
+    int i = 0;
+
+    if (cnt == 0) {
+        return;
+    }
+
+    for (i = 0; i < cnt; i++) {
+        if (actions->actions[i].type == type) {
+            if (i+1 == cnt) {
+                actions->actions[i].type = 0;
+                actions->actions[i].conf = NULL;
+                actions->cnt -= 1;
+                break;
+            }
+
+            while (i+1 < cnt) {
+                actions->actions[i].type = actions->actions[i+1].type;
+                actions->actions[i].conf = actions->actions[i+1].conf;
+                i++;
+            }
+
+            actions->cnt -= 1;
+            break;
+        }
+    }
+}
+
 static int
 netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                              const struct match *match,
@@ -1370,6 +1402,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         struct rte_flow_item_vxlan vxlan;
     } spec, mask;
     bool vxlan_match_flag = false, vxlan_encap_flag=false;
+    bool jump_table_vxlan_decap_flags=false;
     odp_port_t cfg_port = 0;
 
     memset(&spec, 0, sizeof spec);
@@ -1383,7 +1416,10 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             && IS_JUMP_TABLE_RECIRC_ID(match->flow.recirc_id)) {
         //if match key has 0xFF01000A pattern, then we will install flow in A table in HW
         flow_attr.group = GET_RECIRC_JUMP_TABLE_ID(match->flow.recirc_id);
-    }
+        if (GET_RECIRC_JUMP_TABLE_VXLAN_DECAP_FLAG(match->flow.recirc_id)) {
+            jump_table_vxlan_decap_flags=true;
+        }
+     }
 
     /* vxlan pattern */
     if (match->wc.masks.tunnel.ip_src ||
@@ -1410,7 +1446,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
         mask.outer_ipv4.hdr.src_addr        = match->wc.masks.tunnel.ip_src;
         mask.outer_ipv4.hdr.dst_addr        = match->wc.masks.tunnel.ip_dst;
 
-        if (flow_attr.group == COMMON_OFFLOAD_PORT_TBALE_ID) {
+        if (!jump_table_vxlan_decap_flags) {
             add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_IPV4,
                              &spec.outer_ipv4, &mask.outer_ipv4);
         }
@@ -1428,7 +1464,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             mask.outer_udp.hdr.src_port = match->wc.masks.tunnel.tp_src;
             mask.outer_udp.hdr.dst_port = match->wc.masks.tunnel.tp_dst;
 
-            if (flow_attr.group == COMMON_OFFLOAD_PORT_TBALE_ID) {
+            if (!jump_table_vxlan_decap_flags) {
                 add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_UDP,
                                  &spec.outer_udp, &mask.outer_udp);
             }
@@ -1461,7 +1497,7 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
             mask.vxlan.vni[1] = vni_m.vni[2];
             mask.vxlan.vni[2] = vni_m.vni[3];
 
-            if (flow_attr.group == COMMON_OFFLOAD_PORT_TBALE_ID) {
+            if (!jump_table_vxlan_decap_flags) {
                 add_flow_pattern(&patterns, RTE_FLOW_ITEM_TYPE_VXLAN,
                                  &spec.vxlan, &mask.vxlan);
                 vxlan_match_flag = true;
@@ -1677,6 +1713,9 @@ netdev_offload_dpdk_add_flow(struct dpif *dpif, struct netdev *netdev,
                 netdev_offload_output_action(netdev, info->dpif_class, &actions,
                         &port_id, &out_put_action_cnt, 0, true);
             } else if (IS_JUMP_TABLE_RECIRC_ID(*recirc_id)) {
+                if (!GET_RECIRC_JUMP_TABLE_VXLAN_DECAP_FLAG(*recirc_id)) {
+                    del_flow_action(&actions, RTE_FLOW_ACTION_TYPE_VXLAN_DECAP);
+                }
                 netdev_offload_jump_group_action(&flow_attr, &actions,
                         OFFLOAD_JUMP_TABLE_COMMON, recirc_id, &tbl);
             } else {
