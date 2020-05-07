@@ -8690,13 +8690,14 @@ set_zone_to_dst_eth(struct ovs_key_ethernet *key, struct ovs_key_ethernet *mask,
 }
 
 #define CT_OFFLOAD_RECIRC_ID 0xFF010103
-void
+int
 conntrack_nat_offload_flow_put(struct conntrack *ct, struct dp_packet *pkt,
                                struct conn *conn, bool is_reply)
 OVS_REQUIRES(conn->lock)
 {
     struct dp_netdev_flow *netdev_flow;
     struct dp_netdev_pmd_thread *pmd;
+    struct dp_netdev_port *port;
     struct netdev_flow_key mask, key;
     struct match match;
     ovs_u128 ufid;
@@ -8718,6 +8719,21 @@ OVS_REQUIRES(conn->lock)
     match.flow.dl_type=htons(0x0800);
     match.flow.in_port.odp_port = pkt->md.in_port.odp_port;
 
+    ovs_mutex_lock(&ct->dp->port_mutex);
+    port = dp_netdev_lookup_port(ct->dp, pkt->md.in_port.odp_port);
+    if (!port) {
+        ovs_mutex_unlock(&ct->dp->port_mutex);
+        VLOG_WARN("port %d is not found to create ct offload flow", pkt->md.in_port.odp_port);
+        return -1;
+    }
+    if (!strcmp(port->type, "vxlan")) {
+        match.flow.tunnel.tun_id = pkt->md.tunnel.tun_id;
+        match.flow.tunnel.ip_dst = pkt->md.tunnel.ip_dst;
+        match.wc.masks.tunnel.tun_id = OVS_BE64_MAX;
+        match.wc.masks.tunnel.ip_dst = OVS_BE32_MAX;
+    }
+    ovs_mutex_unlock(&ct->dp->port_mutex);
+
     if (!is_reply) {
         match.flow.recirc_id = conn->flow.recirc_id;
         match.flow.nw_src = conn->key.src.addr.ipv4;
@@ -8728,11 +8744,6 @@ OVS_REQUIRES(conn->lock)
             match.flow.tp_src = conn->key.src.port;
             match.flow.tp_dst = conn->key.dst.port;
         }
-
-        match.flow.tunnel.tun_id = pkt->md.tunnel.tun_id;
-        match.flow.tunnel.ip_dst = pkt->md.tunnel.ip_dst;
-        match.wc.masks.tunnel.tun_id = OVS_BE64_MAX;
-        match.wc.masks.tunnel.ip_dst = OVS_BE32_MAX;
     } else {
         match.flow.recirc_id = conn->rev_flow.recirc_id;
         match.flow.nw_src = conn->rev_key.src.addr.ipv4;
@@ -8878,6 +8889,7 @@ OVS_REQUIRES(conn->lock)
     }
 
     ofpbuf_uninit(&actions);
+    return 0;
 }
 
 void

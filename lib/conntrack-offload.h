@@ -9,7 +9,7 @@ conntrack_nat_offload_is_enable(void);
 uint32_t
 conntrack_nat_offload_flow_hash(const ovs_u128 *ufid);
 
-void
+int
 conntrack_nat_offload_flow_put(struct conntrack *ct, struct dp_packet *pkt,
                                struct conn *conn, bool is_reply)
     OVS_REQUIRES(conn->lock);

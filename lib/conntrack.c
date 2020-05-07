@@ -1243,8 +1243,10 @@ process_one(struct conntrack *ct, struct dp_packet *pkt,
                 para->flow_flags == DPCLS_RULE_FLAGS_SKIP_HW_ACTION_EXACT_CT) {
                 conn->rev_flow.priority = 10;
                 conn->rev_flow.recirc_id = para->recirc_id;
-                conntrack_nat_offload_flow_put(ct, pkt, conn, true);
-                conn->rev_flow.is_offloaded = true;
+                int ret = conntrack_nat_offload_flow_put(ct, pkt, conn, true);
+                if (!ret) {
+                    conn->rev_flow.is_offloaded = true;
+                }
             }
             ovs_mutex_unlock(&conn->lock);
         }
@@ -1293,8 +1295,10 @@ process_one(struct conntrack *ct, struct dp_packet *pkt,
                 conn->flow.priority = 6;
                 conn->flow.recirc_id = para->recirc_id;
                 conn->expiration = LLONG_MAX;
-                conntrack_nat_offload_flow_put(ct, pkt, conn, false);
-                conn->flow.is_offloaded = true;
+                int ret = conntrack_nat_offload_flow_put(ct, pkt, conn, false);
+                if (!ret) {
+                    conn->flow.is_offloaded = true;
+                }
             }
             ovs_mutex_unlock(&conn->lock);
         }
